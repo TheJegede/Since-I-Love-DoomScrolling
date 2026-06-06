@@ -8,6 +8,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 if not os.environ.get("GROQ_API_KEY"):
     os.environ["GROQ_API_KEY"] = "mock_groq_key_for_testing"
 
+# Never spawn the background worker thread during tests
+os.environ["ENABLE_WORKER"] = "0"
+
 try:
     from fastapi.testclient import TestClient
 except ImportError:
@@ -240,6 +243,69 @@ def test_extract_url_regression():
         main.db.get_reel_by_url = orig_cache
 
 
+def test_worker_tick_success():
+    print("Testing worker_tick processes a pending reel (mocked)...")
+    import main
+    long_transcript = " ".join(["word"] * 30)
+    mocked = ReelExtraction(core_topic="T", key_takeaway="K",
+                            action_items=["a"], tools_or_resources=["b"])
+    captured = {}
+    orig = (main.db.claim_next_pending, main.download_and_extract_audio,
+            main.transcribe_audio, main.extract_structured_json,
+            main.db.update_reel_result, main.db.mark_failed)
+    main.db.claim_next_pending = lambda: {"id": "row1", "url": "https://www.instagram.com/reel/Z/"}
+    main.download_and_extract_audio = lambda url: ("/tmp/nope.mp3", "cap", "Title")
+    main.transcribe_audio = lambda p: long_transcript
+    main.extract_structured_json = lambda t, c: mocked
+    main.db.update_reel_result = lambda reel_id, title, raw_transcript, post_caption, extracted_json, status="done": captured.update(
+        {"id": reel_id, "status": status, "title": title})
+    main.db.mark_failed = lambda reel_id, error: captured.update({"failed": reel_id})
+    try:
+        did = main.worker_tick()
+        assert did is True
+        assert captured["id"] == "row1", captured
+        assert captured["status"] == "done", captured
+        assert "failed" not in captured
+        print("[OK] worker_tick success passed!")
+    finally:
+        (main.db.claim_next_pending, main.download_and_extract_audio,
+         main.transcribe_audio, main.extract_structured_json,
+         main.db.update_reel_result, main.db.mark_failed) = orig
+
+
+def test_worker_tick_failure():
+    print("Testing worker_tick marks a failed download (mocked)...")
+    import main
+    from fastapi import HTTPException
+    captured = {}
+    orig = (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed)
+    main.db.claim_next_pending = lambda: {"id": "row2", "url": "https://www.instagram.com/reel/F/"}
+    def _boom(url):
+        raise HTTPException(status_code=500, detail="Meta blocking request")
+    main.download_and_extract_audio = _boom
+    main.db.mark_failed = lambda reel_id, error: captured.update({"id": reel_id, "error": str(error)})
+    try:
+        did = main.worker_tick()
+        assert did is True
+        assert captured["id"] == "row2", captured
+        assert "Meta blocking" in captured["error"]
+        print("[OK] worker_tick failure passed!")
+    finally:
+        (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed) = orig
+
+
+def test_worker_tick_empty():
+    print("Testing worker_tick no-op on empty queue...")
+    import main
+    orig = main.db.claim_next_pending
+    main.db.claim_next_pending = lambda: None
+    try:
+        assert main.worker_tick() is False
+        print("[OK] worker_tick empty passed!")
+    finally:
+        main.db.claim_next_pending = orig
+
+
 def test_delete_reel():
     print("Testing DELETE /reels/{id} (db mocked)...")
     import main
@@ -297,6 +363,9 @@ if __name__ == "__main__":
     test_cluster_merge_pass()
     test_db_module_surface()
     test_db_queue_surface()
+    test_worker_tick_success()
+    test_worker_tick_failure()
+    test_worker_tick_empty()
     test_extract_url_regression()
     test_delete_reel()
     test_list_clusters()

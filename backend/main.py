@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import threading
 import tempfile
 import logging
 from typing import List, Optional
@@ -543,6 +544,75 @@ async def extract_url(payload: dict):
     if not url:
         raise HTTPException(status_code=400, detail="Missing required 'url' parameter.")
     return process_reel_url(url)
+
+
+def process_pending_reel(row: dict) -> None:
+    """Run the pipeline for one claimed queue row and UPDATE it in place.
+
+    Unlike process_reel_url, this never inserts — the row already exists as
+    'processing'. Download failures (e.g. IG 403) mark the row 'failed' so it
+    can be retried later by resetting its status to 'pending'."""
+    reel_id = row["id"]
+    url = row["url"]
+    mp3_path = None
+    try:
+        mp3_path, post_caption, title = download_and_extract_audio(url)
+        raw_transcript = ""
+        try:
+            raw_transcript = transcribe_audio(mp3_path)
+        except Exception as e:
+            logger.warning(f"Transcription failed: {str(e)}. Using caption only.")
+        guard_silent_hook(raw_transcript, post_caption)
+        extracted = extract_structured_json(raw_transcript, post_caption)
+        db.update_reel_result(
+            reel_id=reel_id,
+            title=title,
+            raw_transcript=raw_transcript,
+            post_caption=post_caption,
+            extracted_json=extracted.model_dump(),
+        )
+        logger.info(f"Worker processed reel {reel_id} ({url})")
+    except HTTPException as e:
+        logger.warning(f"Worker failed reel {reel_id}: {e.detail}")
+        db.mark_failed(reel_id, e.detail)
+    except Exception as e:
+        logger.error(f"Worker error on reel {reel_id}: {str(e)}")
+        db.mark_failed(reel_id, str(e))
+    finally:
+        if mp3_path and os.path.exists(mp3_path):
+            try:
+                os.remove(mp3_path)
+            except Exception as ce:
+                logger.warning(f"Could not delete temp file {mp3_path}: {str(ce)}")
+
+
+def worker_tick() -> bool:
+    """Process at most one pending reel. Returns True if one was claimed."""
+    row = db.claim_next_pending()
+    if not row:
+        return False
+    process_pending_reel(row)
+    return True
+
+
+def _worker_loop(poll_interval: float = 5.0, idle_interval: float = 20.0) -> None:
+    """Background loop: drain the queue, backing off when it's empty."""
+    logger.info("Queue worker started.")
+    while True:
+        try:
+            did_work = worker_tick()
+        except Exception as e:
+            logger.error(f"Worker tick crashed: {str(e)}")
+            did_work = False
+        time.sleep(poll_interval if did_work else idle_interval)
+
+
+@app.on_event("startup")
+def _start_worker():
+    if os.getenv("ENABLE_WORKER", "1") == "0":
+        logger.info("ENABLE_WORKER=0 — queue worker disabled.")
+        return
+    threading.Thread(target=_worker_loop, daemon=True).start()
 
 @app.post("/extract/file", response_model=ExtractionResponse)
 async def extract_file(
