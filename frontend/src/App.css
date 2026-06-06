@@ -182,3 +182,19 @@
     border-right-color: var(--border);
   }
 }
+
+/* Tabular insights view + clustering controls */
+.controls-bar { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
+.controls-bar select { padding: 0.4rem 0.6rem; border-radius: 8px; }
+.view-toggle button { padding: 0.4rem 0.9rem; border: 1px solid #ccc; background: #fff; cursor: pointer; color: #111; }
+.view-toggle button.active { background: #111; color: #fff; }
+.view-toggle button:first-child { border-radius: 8px 0 0 8px; }
+.view-toggle button:last-child { border-radius: 0 8px 8px 0; }
+.insights-table { width: 100%; border-collapse: collapse; }
+.insights-table th, .insights-table td { text-align: left; padding: 0.6rem; border-bottom: 1px solid rgba(255,255,255,0.1); vertical-align: top; }
+.insights-table tbody tr { cursor: pointer; }
+.insights-table tbody tr:hover { background: rgba(255,255,255,0.05); }
+.tool-chip { display: inline-block; background: rgba(120,130,255,0.18); border-radius: 6px; padding: 0.1rem 0.4rem; margin: 0 0.2rem 0.2rem 0; font-size: 0.8rem; }
+.cluster-pill { background: rgba(110,231,150,0.18); border-radius: 6px; padding: 0.1rem 0.5rem; font-size: 0.8rem; }
+.recompute-btn { padding: 0.4rem 0.9rem; border-radius: 8px; border: none; background: #4f46e5; color: #fff; cursor: pointer; }
+.recompute-btn:disabled { opacity: 0.6; cursor: default; }

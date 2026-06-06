@@ -145,7 +145,10 @@ def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
         "You are a content librarian. Group the given items into a small number of "
         "emergent topic clusters (aim for 4 to 12, fewer if there are few items). "
         "Invent a short, human-readable name for each cluster (e.g. 'AI Tools', "
-        "'Cooking', 'Personal Finance'). Every item id must appear exactly once. "
+        "'Cooking', 'Personal Finance'). Merge near-identical or overlapping themes "
+        "into one cluster (e.g. 'Website Security' and 'Website Security Testing' are "
+        "the same cluster); prefer fewer, broader groups over many tiny ones. "
+        "Every item id must appear exactly once. "
         "Respond ONLY with valid JSON in exactly this shape, no markdown or prose:\n"
         '{"assignments": [{"id": "<id>", "cluster": "<cluster name>"}]}'
     )
