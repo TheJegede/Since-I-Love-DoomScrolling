@@ -43,3 +43,15 @@ Tuned clustering prompt to merge near-duplicate themes (live: 7→4 clusters sam
 Commits 5fe309f, 1404911, 7a3610a, e893c6d on `feat/tabular-clustering` (branched from main; NOT yet merged/pushed).
 NOT yet done: real-browser DOM verification of the table UI (only Vite-compile checked); restart backend without --reload picks up edits, so use Stop-Process on :8000 then relaunch.
 local_storage.db has junk rows from repeated test seeding (Marathon/AI email) — harmless, gitignored.
+
+### 2026-06-06 — Supabase verification + Vercel deploy (branch `feat/supabase-hybrid`)
+- Resumed implementation plan from `docs/superpowers/plans/2026-06-06-vercel-dashboard.md`.
+- Completed **Task 3 Step 7 (local test)**: created `frontend/.env.local` containing Supabase variables and local API URL fallback, verified client loads reels successfully from Supabase locally.
+- Completed **Task 5 (Vercel deploy)**: 
+  - Linked project as `reels-transcriber` under scope `thejegedes-projects` on Vercel.
+  - Set production env vars (`VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`) non-interactively via CLI.
+  - Configured custom production domain `reels-transcriber.vercel.app` mapped to latest production deploy.
+- Verified live production site in browser (loaded 343 reels directly from Supabase, zero console errors).
+- Cleaned up frontend ESLint issues (unused imports and `useEffect` hook order/hoisting issues in `App.jsx`) and verified that `npm run lint` and `npm run build` now pass cleanly.
+- Staged and committed changes (`frontend/.gitignore`, `frontend/src/App.jsx`) on branch `feat/supabase-hybrid`.
+
