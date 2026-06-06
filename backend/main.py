@@ -49,6 +49,10 @@ def init_local_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
             )
         """)
+        # Idempotent migration: add cluster column if missing
+        existing_cols = [r[1] for r in cursor.execute("PRAGMA table_info(saved_reels)").fetchall()]
+        if "cluster" not in existing_cols:
+            cursor.execute("ALTER TABLE saved_reels ADD COLUMN cluster TEXT")
         conn.commit()
         conn.close()
         logger.info(f"Initialized local SQLite database at: {DB_PATH}")

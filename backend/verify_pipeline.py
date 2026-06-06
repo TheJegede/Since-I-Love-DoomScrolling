@@ -27,6 +27,18 @@ def test_health():
     assert response.json()["status"] == "ok"
     print("[OK] Health check passed!")
 
+def test_cluster_column_migration():
+    print("Testing cluster column migration (idempotent)...")
+    import main, sqlite3
+    # Run init twice — must not error and column must exist exactly once
+    main.init_local_db()
+    main.init_local_db()
+    conn = sqlite3.connect(main.DB_PATH)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(saved_reels)").fetchall()]
+    conn.close()
+    assert cols.count("cluster") == 1, f"cluster column missing/duplicated: {cols}"
+    print("[OK] cluster column migration passed!")
+
 def test_extract_text_mock():
     print("Testing POST /extract/text with mock data...")
     # Monkeypatch the extract_structured_json function in main to prevent external calls
@@ -74,6 +86,7 @@ def test_extract_text_mock():
 if __name__ == "__main__":
     print("--- Starting Transcriber Pipeline Test ---")
     test_health()
+    test_cluster_column_migration()
     test_extract_text_mock()
     print("--- All tests completed successfully! ---")
     sys.exit(0)
