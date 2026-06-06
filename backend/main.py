@@ -600,17 +600,13 @@ def list_clusters():
         logger.error(f"Failed to list clusters: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to list clusters: {str(e)}")
 
-@app.post("/extract/url", response_model=ExtractionResponse)
-async def extract_url(payload: dict):
-    """
-    Accepts Instagram Reel URL. Downloads video, extracts audio, transcribes audio,
-    combines description with transcript, extracts JSON highlights, and saves to database.
-    """
-    url = payload.get("url")
-    if not url:
-        raise HTTPException(status_code=400, detail="Missing required 'url' parameter.")
+def process_reel_url(url: str) -> dict:
+    """Full single-reel pipeline. Returns the saved DB record.
 
-    # Check if we already processed this URL to save API tokens
+    Returns the cached row if this URL was already processed. Raises
+    HTTPException(400) on silent-hook reels (no spoken content). Always
+    cleans up the temp audio file. Used by /extract/url and the queue worker."""
+    # Cache: skip inference if we already have this URL
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -626,47 +622,44 @@ async def extract_url(payload: dict):
                 "raw_transcript": row[3],
                 "post_caption": row[4],
                 "extracted_json": json.loads(row[5]),
-                "created_at": row[6]
+                "created_at": row[6],
             }
     except Exception as e:
         logger.warning(f"Failed to check existing SQLite URL cache: {str(e)}")
 
     mp3_path = None
     try:
-        # 1. Download video and extract audio MP3 & caption description
         mp3_path, post_caption, title = download_and_extract_audio(url)
-
-        # 2. Transcribe Audio
         raw_transcript = ""
         try:
             raw_transcript = transcribe_audio(mp3_path)
         except Exception as e:
             logger.warning(f"Transcription failed: {str(e)}. Proceeding using metadata/caption only.")
-
-        # 3. Check for empty transcription/silent hook
         guard_silent_hook(raw_transcript, post_caption)
-
-        # 4. Extract structured insights
         extracted_data = extract_structured_json(raw_transcript, post_caption)
-
-        # 5. Commit record to database
-        db_record = save_to_database(
+        return save_to_database(
             url=url,
             title=title,
             raw_transcript=raw_transcript,
             post_caption=post_caption,
-            extracted=extracted_data
+            extracted=extracted_data,
         )
-
-        return db_record
     finally:
-        # Cleanup temporary audio files
         if mp3_path and os.path.exists(mp3_path):
             try:
                 os.remove(mp3_path)
                 logger.info(f"Cleaned up temporary audio file: {mp3_path}")
             except Exception as ce:
                 logger.warning(f"Could not delete temp file {mp3_path}: {str(ce)}")
+
+
+@app.post("/extract/url", response_model=ExtractionResponse)
+async def extract_url(payload: dict):
+    """Accepts an Instagram Reel URL and runs the full extraction pipeline."""
+    url = payload.get("url")
+    if not url:
+        raise HTTPException(status_code=400, detail="Missing required 'url' parameter.")
+    return process_reel_url(url)
 
 @app.post("/extract/file", response_model=ExtractionResponse)
 async def extract_file(

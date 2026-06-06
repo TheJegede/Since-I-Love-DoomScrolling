@@ -214,6 +214,36 @@ def test_cluster_merge_pass():
         main.CLUSTER_CHUNK_DELAY = orig_delay
 
 
+def test_extract_url_regression():
+    print("Testing POST /extract/url via process_reel_url (mocked)...")
+    import main
+    long_transcript = " ".join(["word"] * 30)  # clears the 15-word silent-hook guard
+    mocked = ReelExtraction(
+        core_topic="Topic", key_takeaway="Takeaway",
+        action_items=["a"], tools_or_resources=["b"])
+    orig_dl = main.download_and_extract_audio
+    orig_tr = main.transcribe_audio
+    orig_ex = main.extract_structured_json
+    orig_save = main.save_to_database
+    main.download_and_extract_audio = lambda url: ("/tmp/does_not_exist.mp3", "cap", "Title")
+    main.transcribe_audio = lambda p: long_transcript
+    main.extract_structured_json = lambda t, c: mocked
+    main.save_to_database = lambda url, title, raw_transcript, post_caption, extracted: {
+        "id": "id-1", "url": url, "title": title,
+        "raw_transcript": raw_transcript, "post_caption": post_caption,
+        "extracted_json": extracted.model_dump(), "created_at": "2026-06-06T00:00:00Z"}
+    try:
+        r = client.post("/extract/url", json={"url": "https://www.instagram.com/reel/REGRESSION1/"})
+        assert r.status_code == 200, r.text
+        assert r.json()["extracted_json"]["core_topic"] == "Topic"
+        print("[OK] extract_url regression passed!")
+    finally:
+        main.download_and_extract_audio = orig_dl
+        main.transcribe_audio = orig_tr
+        main.extract_structured_json = orig_ex
+        main.save_to_database = orig_save
+
+
 def test_delete_reel():
     print("Testing DELETE /reels/{id}...")
     import main, sqlite3, uuid, json
@@ -268,6 +298,7 @@ if __name__ == "__main__":
     test_recompute_clusters_mock()
     test_cluster_chunking()
     test_cluster_merge_pass()
+    test_extract_url_regression()
     test_delete_reel()
     test_list_clusters()
     test_reels_include_cluster()
