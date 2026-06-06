@@ -1,0 +1,95 @@
+"""Supabase-backed data layer for Transcriber.
+
+All persistence goes through this module so main.py never touches the DB driver
+directly. The backend authenticates with the Supabase SERVICE ROLE key (bypasses
+RLS) and must only ever run on a trusted machine.
+"""
+import json
+import os
+import uuid
+from collections import Counter
+from datetime import datetime, timezone
+from typing import Optional
+
+from supabase import create_client, Client
+
+TABLE = "saved_reels"
+_client: Optional[Client] = None
+
+
+def get_client() -> Client:
+    """Lazily create the Supabase client so importing db.py never needs creds."""
+    global _client
+    if _client is None:
+        url = os.getenv("SUPABASE_URL")
+        key = os.getenv("SUPABASE_SERVICE_KEY")
+        if not url or not key:
+            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set.")
+        _client = create_client(url, key)
+    return _client
+
+
+def row_to_record(r: dict) -> dict:
+    """Map a raw DB row to the API record shape the frontend expects."""
+    ej = r.get("extracted_json")
+    if isinstance(ej, str):
+        ej = json.loads(ej)
+    return {
+        "id": r["id"],
+        "url": r.get("url"),
+        "title": r.get("title"),
+        "raw_transcript": r.get("raw_transcript"),
+        "post_caption": r.get("post_caption"),
+        "extracted_json": ej,
+        "created_at": r.get("created_at"),
+        "cluster": r.get("cluster") or "Unclustered",
+    }
+
+
+def get_reel_by_url(url: str) -> Optional[dict]:
+    res = get_client().table(TABLE).select("*").eq("url", url).limit(1).execute()
+    rows = res.data or []
+    return row_to_record(rows[0]) if rows else None
+
+
+def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
+                status="done", source=None) -> dict:
+    row = {
+        "id": str(uuid.uuid4()),
+        "url": url,
+        "title": title,
+        "raw_transcript": raw_transcript,
+        "post_caption": post_caption,
+        "extracted_json": extracted_json,  # dict -> jsonb
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "status": status,
+        "source": source,
+    }
+    get_client().table(TABLE).insert(row).execute()
+    return row_to_record(row)
+
+
+def list_reels(limit: int = 20, search: Optional[str] = None) -> list:
+    q = get_client().table(TABLE).select("*").order("created_at", desc=True).limit(limit)
+    if search:
+        # UI filters in-memory; this server search is a coarse fallback over text cols.
+        like = f"%{search}%"
+        q = q.or_(f"title.ilike.{like},raw_transcript.ilike.{like},post_caption.ilike.{like}")
+    res = q.execute()
+    return [row_to_record(r) for r in (res.data or [])]
+
+
+def reels_for_clustering() -> list:
+    res = get_client().table(TABLE).select("id, extracted_json").execute()
+    return res.data or []
+
+
+def set_cluster(reel_id: str, cluster: str) -> None:
+    get_client().table(TABLE).update({"cluster": cluster}).eq("id", reel_id).execute()
+
+
+def cluster_counts() -> list:
+    res = get_client().table(TABLE).select("cluster").execute()
+    counts = Counter((r.get("cluster") or "Unclustered") for r in (res.data or []))
+    return [{"name": name, "count": n}
+            for name, n in sorted(counts.items(), key=lambda kv: -kv[1])]

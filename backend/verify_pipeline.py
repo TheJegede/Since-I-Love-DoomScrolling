@@ -214,6 +214,16 @@ def test_cluster_merge_pass():
         main.CLUSTER_CHUNK_DELAY = orig_delay
 
 
+def test_db_module_surface():
+    print("Testing db.py exposes the expected data-layer functions...")
+    import db
+    for fn in ("get_reel_by_url", "insert_reel", "list_reels",
+               "reels_for_clustering", "set_cluster", "cluster_counts",
+               "row_to_record"):
+        assert hasattr(db, fn), f"db.{fn} missing"
+    print("[OK] db module surface passed!")
+
+
 def test_extract_url_regression():
     print("Testing POST /extract/url via process_reel_url (mocked)...")
     import main
@@ -298,6 +308,7 @@ if __name__ == "__main__":
     test_recompute_clusters_mock()
     test_cluster_chunking()
     test_cluster_merge_pass()
+    test_db_module_surface()
     test_extract_url_regression()
     test_delete_reel()
     test_list_clusters()
