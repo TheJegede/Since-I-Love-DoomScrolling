@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import tempfile
 import logging
 from typing import List, Optional
@@ -133,26 +134,41 @@ class ClusterAssignment(BaseModel):
 class ClusterAssignments(BaseModel):
     assignments: List[ClusterAssignment]
 
-def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
-    """Group reel topics into emergent clusters via one Llama call.
+# Clustering is chunked to stay under Groq's free-tier token-per-minute cap.
+# One all-in-one call over a large library (~350 reels) exceeds the 6000 TPM
+# limit, so topics are clustered in small batches paced apart, with each batch
+# told the cluster names discovered so far to keep naming consistent.
+CLUSTER_CHUNK_SIZE = 50
+CLUSTER_CHUNK_DELAY = 30  # seconds between Groq calls, to respect 6000 TPM cap
 
-    items: list of {"id": str, "topic": str}. Returns list of {"id", "cluster"}.
-    Monkeypatched in tests to avoid a real Groq call."""
+
+def _cluster_one_chunk(chunk: List[dict], existing_clusters: List[str]) -> List[dict]:
+    """Cluster one batch of {"id", "topic"} items via a single Llama call.
+
+    `existing_clusters` are names already assigned in prior batches; the model is
+    asked to reuse a fitting one before inventing a new cluster. Returns
+    [{"id", "cluster"}]. Monkeypatched in tests to avoid a real Groq call."""
     if not groq_client:
         raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
 
+    reuse_hint = ""
+    if existing_clusters:
+        reuse_hint = (
+            "Existing cluster names (reuse one verbatim if an item fits it; only "
+            "invent a new name when none fit):\n" + json.dumps(existing_clusters) + "\n\n"
+        )
+
     system_prompt = (
-        "You are a content librarian. Group the given items into a small number of "
-        "emergent topic clusters (aim for 4 to 12, fewer if there are few items). "
-        "Invent a short, human-readable name for each cluster (e.g. 'AI Tools', "
-        "'Cooking', 'Personal Finance'). Merge near-identical or overlapping themes "
-        "into one cluster (e.g. 'Website Security' and 'Website Security Testing' are "
-        "the same cluster); prefer fewer, broader groups over many tiny ones. "
-        "Every item id must appear exactly once. "
+        "You are a content librarian. Group the given items into emergent topic "
+        "clusters. Invent a short, human-readable name for each cluster (e.g. "
+        "'AI Tools', 'Cooking', 'Personal Finance'). Merge near-identical or "
+        "overlapping themes into one cluster (e.g. 'Website Security' and 'Website "
+        "Security Testing' are the same); prefer fewer, broader groups over many "
+        "tiny ones. Every item id must appear exactly once. "
         "Respond ONLY with valid JSON in exactly this shape, no markdown or prose:\n"
         '{"assignments": [{"id": "<id>", "cluster": "<cluster name>"}]}'
     )
-    user_prompt = "Items to cluster (JSON):\n" + json.dumps(items)
+    user_prompt = reuse_hint + "Items to cluster (JSON):\n" + json.dumps(chunk)
 
     try:
         response = groq_client.chat.completions.create(
@@ -171,6 +187,41 @@ def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
         raise HTTPException(status_code=500, detail="Clustering model returned invalid JSON.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Clustering failed: {str(e)}")
+
+
+def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
+    """Group reel topics into emergent clusters, batching to stay under TPM limits.
+
+    items: list of {"id": str, "topic": str}. Returns list of {"id", "cluster"}.
+    Real ids are mapped to short integer indices before each Groq call (smaller
+    payload) and mapped back afterward."""
+    # Map real ids -> short indices to shrink the request payload
+    idx_to_id = {}
+    indexed = []
+    for i, it in enumerate(items):
+        idx = str(i)
+        idx_to_id[idx] = it["id"]
+        indexed.append({"id": idx, "topic": it.get("topic", "")})
+
+    assignments = []
+    known_clusters: List[str] = []
+    for start in range(0, len(indexed), CLUSTER_CHUNK_SIZE):
+        chunk = indexed[start:start + CLUSTER_CHUNK_SIZE]
+        part = _cluster_one_chunk(chunk, known_clusters)
+        for a in part:
+            assignments.append(a)
+            name = a.get("cluster")
+            if name and name not in known_clusters:
+                known_clusters.append(name)
+        if start + CLUSTER_CHUNK_SIZE < len(indexed) and CLUSTER_CHUNK_DELAY:
+            time.sleep(CLUSTER_CHUNK_DELAY)
+
+    # Map indices back to real ids; drop anything the model invented/dropped
+    return [
+        {"id": idx_to_id[a["id"]], "cluster": a["cluster"]}
+        for a in assignments
+        if a.get("id") in idx_to_id and a.get("cluster")
+    ]
 
 # Helper functions
 def get_cookie_file() -> Optional[str]:

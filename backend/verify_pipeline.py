@@ -131,6 +131,40 @@ def test_recompute_clusters_mock():
     finally:
         main.cluster_topics_with_llm = original
 
+def test_cluster_chunking():
+    print("Testing cluster_topics_with_llm chunks large inputs...")
+    import main
+    items = [{"id": f"id{i}", "topic": f"topic {i % 3}"} for i in range(130)]
+    calls = []
+    orig_chunk = main._cluster_one_chunk
+    orig_delay = main.CLUSTER_CHUNK_DELAY
+
+    def fake_chunk(chunk, existing):
+        calls.append((len(chunk), list(existing)))
+        return [{"id": c["id"], "cluster": "C" + c["topic"][-1]} for c in chunk]
+
+    main._cluster_one_chunk = fake_chunk
+    main.CLUSTER_CHUNK_DELAY = 0
+    try:
+        import math
+        out = main.cluster_topics_with_llm(items)
+        # every reel assigned, real ids preserved (index mapping round-trips)
+        assert len(out) == 130, len(out)
+        assert {o["id"] for o in out} == {f"id{i}" for i in range(130)}
+        # chunk count derives from the configured size (not hardcoded)
+        size = main.CLUSTER_CHUNK_SIZE
+        expected_chunks = math.ceil(130 / size)
+        assert len(calls) == expected_chunks, calls
+        assert calls[0][0] == min(size, 130), calls
+        assert calls[-1][0] == 130 - size * (expected_chunks - 1), calls
+        # later chunks receive accumulated cluster names
+        assert calls[1][1], "existing cluster names not propagated to later chunks"
+        print("[OK] cluster chunking passed!")
+    finally:
+        main._cluster_one_chunk = orig_chunk
+        main.CLUSTER_CHUNK_DELAY = orig_delay
+
+
 def test_list_clusters():
     print("Testing GET /clusters...")
     r = client.get("/clusters")
@@ -157,6 +191,7 @@ if __name__ == "__main__":
     test_cluster_assignments_model()
     test_extract_text_mock()
     test_recompute_clusters_mock()
+    test_cluster_chunking()
     test_list_clusters()
     test_reels_include_cluster()
     print("--- All tests completed successfully! ---")
