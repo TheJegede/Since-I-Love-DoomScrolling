@@ -88,6 +88,12 @@ def set_cluster(reel_id: str, cluster: str) -> None:
     get_client().table(TABLE).update({"cluster": cluster}).eq("id", reel_id).execute()
 
 
+def delete_reel(reel_id: str) -> bool:
+    """Delete a reel by id. Returns True if a row was removed, False if none matched."""
+    res = get_client().table(TABLE).delete().eq("id", reel_id).execute()
+    return bool(res.data)
+
+
 def cluster_counts() -> list:
     res = get_client().table(TABLE).select("cluster").execute()
     counts = Counter((r.get("cluster") or "Unclustered") for r in (res.data or []))

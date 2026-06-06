@@ -27,18 +27,6 @@ def test_health():
     assert response.json()["status"] == "ok"
     print("[OK] Health check passed!")
 
-def test_cluster_column_migration():
-    print("Testing cluster column migration (idempotent)...")
-    import main, sqlite3
-    # Run init twice — must not error and column must exist exactly once
-    main.init_local_db()
-    main.init_local_db()
-    conn = sqlite3.connect(main.DB_PATH)
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(saved_reels)").fetchall()]
-    conn.close()
-    assert cols.count("cluster") == 1, f"cluster column missing/duplicated: {cols}"
-    print("[OK] cluster column migration passed!")
-
 def test_cluster_assignments_model():
     print("Testing ClusterAssignments validation...")
     from main import ClusterAssignments
@@ -93,47 +81,34 @@ def test_extract_text_mock():
         main.save_to_database = original_save
 
 def test_recompute_clusters_mock():
-    print("Testing POST /clusters/recompute (mocked)...")
-    import main, sqlite3, json, uuid
-    # Seed two reels directly
-    conn = sqlite3.connect(main.DB_PATH)
-    ids = [str(uuid.uuid4()), str(uuid.uuid4())]
-    payloads = [
-        {"core_topic": "AI email tools", "key_takeaway": "k", "action_items": [], "tools_or_resources": []},
-        {"core_topic": "Marathon training", "key_takeaway": "k", "action_items": [], "tools_or_resources": []},
+    print("Testing POST /clusters/recompute (db + llm mocked)...")
+    import main
+    fake_rows = [
+        {"id": "a", "extracted_json": {"core_topic": "AI email tools"}},
+        {"id": "b", "extracted_json": {"core_topic": "Marathon training"}},
     ]
-    for rid, p in zip(ids, payloads):
-        conn.execute(
-            "INSERT INTO saved_reels (id, url, title, raw_transcript, post_caption, extracted_json) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (rid, None, "t", None, None, json.dumps(p)),
-        )
-    conn.commit(); conn.close()
-
-    original = main.cluster_topics_with_llm
-    # Assign by id so the two freshly-seeded reels get the expected clusters
-    # regardless of how many pre-existing rows the DB already holds.
+    applied = []
+    orig_for = main.db.reels_for_clustering
+    orig_set = main.db.set_cluster
+    orig_counts = main.db.cluster_counts
+    orig_llm = main.cluster_topics_with_llm
+    main.db.reels_for_clustering = lambda: fake_rows
+    main.db.set_cluster = lambda rid, cluster: applied.append((rid, cluster))
+    main.db.cluster_counts = lambda: [{"name": "Productivity", "count": 1},
+                                      {"name": "Fitness", "count": 1}]
     main.cluster_topics_with_llm = lambda items: [
-        {"id": it["id"],
-         "cluster": "Productivity" if it["id"] == ids[0] else "Fitness" if it["id"] == ids[1] else "Other"}
-        for it in items
-    ]
+        {"id": "a", "cluster": "Productivity"}, {"id": "b", "cluster": "Fitness"}]
     try:
         r = client.post("/clusters/recompute")
         assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["assigned"] >= 2
-        conn = sqlite3.connect(main.DB_PATH)
-        got = dict(conn.execute("SELECT id, cluster FROM saved_reels WHERE id IN (?, ?)", ids).fetchall())
-        conn.close()
-        assert set(got.values()) >= {"Productivity", "Fitness"}
+        assert r.json()["assigned"] == 2, r.text
+        assert ("a", "Productivity") in applied
         print("[OK] recompute clusters passed!")
     finally:
-        main.cluster_topics_with_llm = original
-        # Clean up seeded rows so tests never pollute the real DB
-        conn = sqlite3.connect(main.DB_PATH)
-        conn.execute("DELETE FROM saved_reels WHERE id IN (?, ?)", ids)
-        conn.commit(); conn.close()
+        main.db.reels_for_clustering = orig_for
+        main.db.set_cluster = orig_set
+        main.db.cluster_counts = orig_counts
+        main.cluster_topics_with_llm = orig_llm
 
 def test_cluster_chunking():
     print("Testing cluster_topics_with_llm chunks large inputs...")
@@ -235,6 +210,8 @@ def test_extract_url_regression():
     orig_tr = main.transcribe_audio
     orig_ex = main.extract_structured_json
     orig_save = main.save_to_database
+    orig_cache = main.db.get_reel_by_url
+    main.db.get_reel_by_url = lambda url: None
     main.download_and_extract_audio = lambda url: ("/tmp/does_not_exist.mp3", "cap", "Title")
     main.transcribe_audio = lambda p: long_transcript
     main.extract_structured_json = lambda t, c: mocked
@@ -252,57 +229,59 @@ def test_extract_url_regression():
         main.transcribe_audio = orig_tr
         main.extract_structured_json = orig_ex
         main.save_to_database = orig_save
+        main.db.get_reel_by_url = orig_cache
 
 
 def test_delete_reel():
-    print("Testing DELETE /reels/{id}...")
-    import main, sqlite3, uuid, json
-    rid = str(uuid.uuid4())
-    conn = sqlite3.connect(main.DB_PATH)
-    conn.execute(
-        "INSERT INTO saved_reels (id, url, title, raw_transcript, post_caption, extracted_json) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (rid, None, "to delete", None, None, json.dumps({"core_topic": "x"})),
-    )
-    conn.commit(); conn.close()
-
-    r = client.delete(f"/reels/{rid}")
-    assert r.status_code == 200, r.text
-    assert r.json()["deleted"] == rid
-
-    conn = sqlite3.connect(main.DB_PATH)
-    gone = conn.execute("SELECT COUNT(*) FROM saved_reels WHERE id=?", (rid,)).fetchone()[0]
-    conn.close()
-    assert gone == 0, "row not deleted"
-
-    # deleting a missing id -> 404
-    assert client.delete(f"/reels/{rid}").status_code == 404
-    print("[OK] delete reel passed!")
+    print("Testing DELETE /reels/{id} (db mocked)...")
+    import main
+    calls = []
+    orig = main.db.delete_reel
+    # First call: row exists (returns True); second: missing (False -> 404)
+    main.db.delete_reel = lambda rid: (calls.append(rid), len(calls) == 1)[1]
+    try:
+        r = client.delete("/reels/abc")
+        assert r.status_code == 200, r.text
+        assert r.json()["deleted"] == "abc"
+        assert client.delete("/reels/abc").status_code == 404
+        print("[OK] delete reel passed!")
+    finally:
+        main.db.delete_reel = orig
 
 
 def test_list_clusters():
-    print("Testing GET /clusters...")
-    r = client.get("/clusters")
-    assert r.status_code == 200, r.text
-    data = r.json()
-    assert isinstance(data, list)
-    if data:
-        assert "name" in data[0] and "count" in data[0]
-    print("[OK] list clusters passed!")
+    print("Testing GET /clusters (db mocked)...")
+    import main
+    orig = main.db.cluster_counts
+    main.db.cluster_counts = lambda: [{"name": "AI Tools", "count": 3}]
+    try:
+        r = client.get("/clusters")
+        assert r.status_code == 200, r.text
+        assert r.json()[0]["name"] == "AI Tools"
+        print("[OK] list clusters passed!")
+    finally:
+        main.db.cluster_counts = orig
+
 
 def test_reels_include_cluster():
-    print("Testing GET /reels includes cluster field...")
-    r = client.get("/reels")
-    assert r.status_code == 200, r.text
-    data = r.json()
-    if data:
-        assert "cluster" in data[0], f"cluster missing from reel row: {data[0].keys()}"
-    print("[OK] reels include cluster passed!")
+    print("Testing GET /reels includes cluster (db mocked)...")
+    import main
+    orig = main.db.list_reels
+    main.db.list_reels = lambda limit=20, search=None: [{
+        "id": "x", "url": None, "title": "t", "raw_transcript": None,
+        "post_caption": None, "extracted_json": {"core_topic": "c"},
+        "created_at": "2026-06-06T00:00:00Z", "cluster": "Unclustered"}]
+    try:
+        r = client.get("/reels")
+        assert r.status_code == 200, r.text
+        assert "cluster" in r.json()[0]
+        print("[OK] reels include cluster passed!")
+    finally:
+        main.db.list_reels = orig
 
 if __name__ == "__main__":
     print("--- Starting Transcriber Pipeline Test ---")
     test_health()
-    test_cluster_column_migration()
     test_cluster_assignments_model()
     test_extract_text_mock()
     test_recompute_clusters_mock()

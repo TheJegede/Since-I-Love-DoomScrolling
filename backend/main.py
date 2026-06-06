@@ -29,36 +29,15 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY environment variable is not set.")
 
-# Initialize API clients
-import sqlite3
-
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "local_storage.db")
+# Initialize data layer
+import db
 
 def init_local_db():
-    """Initialize local SQLite database for storing Reel transcripts and summaries."""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS saved_reels (
-                id TEXT PRIMARY KEY,
-                url TEXT UNIQUE,
-                title TEXT,
-                raw_transcript TEXT,
-                post_caption TEXT,
-                extracted_json TEXT NOT NULL,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
-            )
-        """)
-        # Idempotent migration: add cluster column if missing
-        existing_cols = [r[1] for r in cursor.execute("PRAGMA table_info(saved_reels)").fetchall()]
-        if "cluster" not in existing_cols:
-            cursor.execute("ALTER TABLE saved_reels ADD COLUMN cluster TEXT")
-        conn.commit()
-        conn.close()
-        logger.info(f"Initialized local SQLite database at: {DB_PATH}")
-    except Exception as e:
-        logger.error(f"Failed to initialize local SQLite database: {str(e)}")
+    """Schema is managed in Supabase (see docs). This only verifies config presence."""
+    if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_KEY"):
+        logger.warning("SUPABASE_URL / SUPABASE_SERVICE_KEY not set — DB calls will fail.")
+    else:
+        logger.info("Supabase configuration detected.")
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
@@ -423,54 +402,27 @@ def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
         raise HTTPException(status_code=500, detail=f"Structured extraction failed: {str(e)}")
 
 def save_to_database(
-    url: Optional[str], 
-    title: str, 
-    raw_transcript: Optional[str], 
-    post_caption: Optional[str], 
-    extracted: ReelExtraction
+    url: Optional[str],
+    title: str,
+    raw_transcript: Optional[str],
+    post_caption: Optional[str],
+    extracted: ReelExtraction,
 ) -> dict:
-    """Save record to local SQLite database, returning the saved record."""
-    import uuid
-    from datetime import datetime
-    row_id = str(uuid.uuid4())
-    created_at = datetime.utcnow().isoformat()
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        if url:
-            cursor.execute("SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at FROM saved_reels WHERE url = ?", (url,))
-            row = cursor.fetchone()
-            if row:
-                logger.info(f"Reel already exists in local SQLite. ID: {row[0]}")
-                return {
-                    "id": row[0],
-                    "url": row[1],
-                    "title": row[2],
-                    "raw_transcript": row[3],
-                    "post_caption": row[4],
-                    "extracted_json": json.loads(row[5]),
-                    "created_at": row[6]
-                }
-        
-        extracted_str = json.dumps(extracted.model_dump())
-        cursor.execute(
-            "INSERT INTO saved_reels (id, url, title, raw_transcript, post_caption, extracted_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (row_id, url, title, raw_transcript, post_caption, extracted_str, created_at)
-        )
-        conn.commit()
-        conn.close()
-        return {
-            "id": row_id,
-            "url": url,
-            "title": title,
-            "raw_transcript": raw_transcript,
-            "post_caption": post_caption,
-            "extracted_json": extracted.model_dump(),
-            "created_at": created_at
-        }
-    except Exception as e:
-        logger.error(f"Local SQLite save failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Local database save failed: {str(e)}")
+    """Persist a record via the Supabase data layer, returning the saved record.
+    If the URL already exists, returns the existing row (cache/idempotency)."""
+    if url:
+        existing = db.get_reel_by_url(url)
+        if existing:
+            logger.info(f"Reel already exists. ID: {existing['id']}")
+            return existing
+    return db.insert_reel(
+        url=url,
+        title=title,
+        raw_transcript=raw_transcript,
+        post_caption=post_caption,
+        extracted_json=extracted.model_dump(),
+        source=None,
+    )
 
 # API Endpoints
 @app.get("/health")
@@ -481,59 +433,20 @@ def health_check():
 @app.get("/reels")
 def list_reels(
     limit: int = Query(20, description="Max number of items to return"),
-    search: Optional[str] = Query(None, description="Query string for searching raw transcripts or extracted JSON")
+    search: Optional[str] = Query(None, description="Search across title/transcript/caption"),
 ):
-    """Retrieve saved reels from local SQLite database."""
+    """Retrieve saved reels from Supabase."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        if search:
-            like_query = f"%{search}%"
-            cursor.execute(
-                "SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at, cluster FROM saved_reels "
-                "WHERE title LIKE ? OR raw_transcript LIKE ? OR post_caption LIKE ? OR extracted_json LIKE ? "
-                "ORDER BY created_at DESC LIMIT ?",
-                (like_query, like_query, like_query, like_query, limit)
-            )
-        else:
-            cursor.execute(
-                "SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at, cluster FROM saved_reels "
-                "ORDER BY created_at DESC LIMIT ?",
-                (limit,)
-            )
-
-        rows = cursor.fetchall()
-        conn.close()
-
-        results = []
-        for r in rows:
-            results.append({
-                "id": r[0],
-                "url": r[1],
-                "title": r[2],
-                "raw_transcript": r[3],
-                "post_caption": r[4],
-                "extracted_json": json.loads(r[5]),
-                "created_at": r[6],
-                "cluster": r[7] if r[7] else "Unclustered"
-            })
-        return results
+        return db.list_reels(limit=limit, search=search)
     except Exception as e:
-        logger.error(f"Error fetching reels from local SQLite: {str(e)}")
+        logger.error(f"Error fetching reels: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch reels: {str(e)}")
 
 @app.delete("/reels/{reel_id}")
 def delete_reel(reel_id: str):
     """Delete a single saved reel by id. 404 if it does not exist."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM saved_reels WHERE id = ?", (reel_id,))
-        conn.commit()
-        deleted = cursor.rowcount
-        conn.close()
-        if deleted == 0:
+        if not db.delete_reel(reel_id):
             raise HTTPException(status_code=404, detail="Reel not found.")
         return {"deleted": reel_id}
     except HTTPException:
@@ -546,40 +459,30 @@ def delete_reel(reel_id: str):
 def recompute_clusters():
     """Regroup all saved reels into emergent topic clusters via one LLM call."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        rows = cursor.execute("SELECT id, extracted_json FROM saved_reels").fetchall()
+        rows = db.reels_for_clustering()
         if not rows:
-            conn.close()
             return {"clusters": [], "assigned": 0}
 
         items = []
-        for rid, ej in rows:
-            try:
-                topic = (json.loads(ej) or {}).get("core_topic", "")
-            except Exception:
-                topic = ""
-            items.append({"id": rid, "topic": topic})
+        for r in rows:
+            ej = r.get("extracted_json")
+            if isinstance(ej, str):
+                try:
+                    ej = json.loads(ej)
+                except Exception:
+                    ej = {}
+            items.append({"id": r["id"], "topic": (ej or {}).get("core_topic", "")})
 
         assignments = cluster_topics_with_llm(items)
-
-        valid_ids = {r[0] for r in rows}
+        valid_ids = {r["id"] for r in rows}
         applied = 0
         for a in assignments:
             if a.get("id") in valid_ids and a.get("cluster"):
-                cursor.execute("UPDATE saved_reels SET cluster = ? WHERE id = ?", (a["cluster"], a["id"]))
+                db.set_cluster(a["id"], a["cluster"])
                 applied += 1
-        conn.commit()
 
-        clusters = [
-            {"name": name, "count": count}
-            for name, count in cursor.execute(
-                "SELECT COALESCE(cluster, 'Unclustered') AS c, COUNT(*) FROM saved_reels GROUP BY c ORDER BY COUNT(*) DESC"
-            ).fetchall()
-        ]
-        conn.close()
         logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
-        return {"clusters": clusters, "assigned": applied}
+        return {"clusters": db.cluster_counts(), "assigned": applied}
     except HTTPException:
         raise
     except Exception as e:
@@ -588,14 +491,9 @@ def recompute_clusters():
 
 @app.get("/clusters")
 def list_clusters():
-    """Return emergent clusters with reel counts. NULL cluster -> 'Unclustered'."""
+    """Return emergent clusters with reel counts."""
     try:
-        conn = sqlite3.connect(DB_PATH)
-        rows = conn.execute(
-            "SELECT COALESCE(cluster, 'Unclustered') AS c, COUNT(*) FROM saved_reels GROUP BY c ORDER BY COUNT(*) DESC"
-        ).fetchall()
-        conn.close()
-        return [{"name": name, "count": count} for name, count in rows]
+        return db.cluster_counts()
     except Exception as e:
         logger.error(f"Failed to list clusters: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to list clusters: {str(e)}")
@@ -607,25 +505,10 @@ def process_reel_url(url: str) -> dict:
     HTTPException(400) on silent-hook reels (no spoken content). Always
     cleans up the temp audio file. Used by /extract/url and the queue worker."""
     # Cache: skip inference if we already have this URL
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at FROM saved_reels WHERE url = ?", (url,))
-        row = cursor.fetchone()
-        conn.close()
-        if row:
-            logger.info(f"Returning cached SQLite database record for URL: {url}")
-            return {
-                "id": row[0],
-                "url": row[1],
-                "title": row[2],
-                "raw_transcript": row[3],
-                "post_caption": row[4],
-                "extracted_json": json.loads(row[5]),
-                "created_at": row[6],
-            }
-    except Exception as e:
-        logger.warning(f"Failed to check existing SQLite URL cache: {str(e)}")
+    cached = db.get_reel_by_url(url)
+    if cached:
+        logger.info(f"Returning cached record for URL: {url}")
+        return cached
 
     mp3_path = None
     try:
