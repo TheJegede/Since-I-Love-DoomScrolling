@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { supabase, rowToRecord } from './supabaseClient';
 import {
@@ -8,7 +8,6 @@ import {
   FileText, 
   Link, 
   ArrowRight, 
-  CheckCircle2, 
   Clock, 
   ExternalLink, 
   Copy, 
@@ -19,7 +18,6 @@ import {
   AlertTriangle, 
   Database,
   UploadCloud,
-  FileText as FileTextIcon,
   Sparkles,
   Info,
   Trash2
@@ -83,13 +81,6 @@ export default function App() {
     { num: 6, label: "Save DB" }
   ];
 
-  // Fetch reels from Supabase on mount
-  useEffect(() => {
-    fetchReels();
-    fetchClusters();
-    checkBackendHealth();
-  }, []);
-
   const checkBackendHealth = async () => {
     try {
       setIsWakingUp(true);
@@ -133,6 +124,14 @@ export default function App() {
     // Clusters are derived from the loaded reels (see fetchReels/computeClusters).
     // Kept as a callable so existing call sites (e.g. after recompute) still work.
   };
+
+  // Fetch reels from Supabase on mount
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchReels();
+    fetchClusters();
+    checkBackendHealth();
+  }, []);
 
   // While any reel is queued/processing, poll so it fills in once the worker finishes.
   useEffect(() => {
