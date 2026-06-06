@@ -126,6 +126,49 @@ class ExtractionResponse(BaseModel):
     extracted_json: ReelExtraction
     created_at: Optional[str] = None
 
+class ClusterAssignment(BaseModel):
+    id: str
+    cluster: str
+
+class ClusterAssignments(BaseModel):
+    assignments: List[ClusterAssignment]
+
+def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
+    """Group reel topics into emergent clusters via one Llama call.
+
+    items: list of {"id": str, "topic": str}. Returns list of {"id", "cluster"}.
+    Monkeypatched in tests to avoid a real Groq call."""
+    if not groq_client:
+        raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
+
+    system_prompt = (
+        "You are a content librarian. Group the given items into a small number of "
+        "emergent topic clusters (aim for 4 to 12, fewer if there are few items). "
+        "Invent a short, human-readable name for each cluster (e.g. 'AI Tools', "
+        "'Cooking', 'Personal Finance'). Every item id must appear exactly once. "
+        "Respond ONLY with valid JSON in exactly this shape, no markdown or prose:\n"
+        '{"assignments": [{"id": "<id>", "cluster": "<cluster name>"}]}'
+    )
+    user_prompt = "Items to cluster (JSON):\n" + json.dumps(items)
+
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+        )
+        content = response.choices[0].message.content
+        data = json.loads(content)
+        validated = ClusterAssignments(**data)
+        return [a.model_dump() for a in validated.assignments]
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Clustering model returned invalid JSON.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Clustering failed: {str(e)}")
+
 # Helper functions
 def get_cookie_file() -> Optional[str]:
     """Check for cookies.txt in common paths to bypass Instagram scraping blocks."""
@@ -343,21 +386,21 @@ def list_reels(
         if search:
             like_query = f"%{search}%"
             cursor.execute(
-                "SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at FROM saved_reels "
+                "SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at, cluster FROM saved_reels "
                 "WHERE title LIKE ? OR raw_transcript LIKE ? OR post_caption LIKE ? OR extracted_json LIKE ? "
                 "ORDER BY created_at DESC LIMIT ?",
                 (like_query, like_query, like_query, like_query, limit)
             )
         else:
             cursor.execute(
-                "SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at FROM saved_reels "
+                "SELECT id, url, title, raw_transcript, post_caption, extracted_json, created_at, cluster FROM saved_reels "
                 "ORDER BY created_at DESC LIMIT ?",
                 (limit,)
             )
-            
+
         rows = cursor.fetchall()
         conn.close()
-        
+
         results = []
         for r in rows:
             results.append({
@@ -367,12 +410,71 @@ def list_reels(
                 "raw_transcript": r[3],
                 "post_caption": r[4],
                 "extracted_json": json.loads(r[5]),
-                "created_at": r[6]
+                "created_at": r[6],
+                "cluster": r[7] if r[7] else "Unclustered"
             })
         return results
     except Exception as e:
         logger.error(f"Error fetching reels from local SQLite: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch reels: {str(e)}")
+
+@app.post("/clusters/recompute")
+def recompute_clusters():
+    """Regroup all saved reels into emergent topic clusters via one LLM call."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        rows = cursor.execute("SELECT id, extracted_json FROM saved_reels").fetchall()
+        if not rows:
+            conn.close()
+            return {"clusters": [], "assigned": 0}
+
+        items = []
+        for rid, ej in rows:
+            try:
+                topic = (json.loads(ej) or {}).get("core_topic", "")
+            except Exception:
+                topic = ""
+            items.append({"id": rid, "topic": topic})
+
+        assignments = cluster_topics_with_llm(items)
+
+        valid_ids = {r[0] for r in rows}
+        applied = 0
+        for a in assignments:
+            if a.get("id") in valid_ids and a.get("cluster"):
+                cursor.execute("UPDATE saved_reels SET cluster = ? WHERE id = ?", (a["cluster"], a["id"]))
+                applied += 1
+        conn.commit()
+
+        clusters = [
+            {"name": name, "count": count}
+            for name, count in cursor.execute(
+                "SELECT COALESCE(cluster, 'Unclustered') AS c, COUNT(*) FROM saved_reels GROUP BY c ORDER BY COUNT(*) DESC"
+            ).fetchall()
+        ]
+        conn.close()
+        logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
+        return {"clusters": clusters, "assigned": applied}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Cluster recompute failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cluster recompute failed: {str(e)}")
+
+@app.get("/clusters")
+def list_clusters():
+    """Return emergent clusters with reel counts. NULL cluster -> 'Unclustered'."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT COALESCE(cluster, 'Unclustered') AS c, COUNT(*) FROM saved_reels GROUP BY c ORDER BY COUNT(*) DESC"
+        ).fetchall()
+        conn.close()
+        return [{"name": name, "count": count} for name, count in rows]
+    except Exception as e:
+        logger.error(f"Failed to list clusters: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to list clusters: {str(e)}")
 
 @app.post("/extract/url", response_model=ExtractionResponse)
 async def extract_url(payload: dict):
