@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './App.css';
+import { supabase, rowToRecord } from './supabaseClient';
 import {
   Clapperboard,
   Search,
@@ -25,6 +26,17 @@ import {
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
+
+function computeClusters(reels) {
+  const counts = {};
+  for (const r of reels) {
+    const c = r.cluster || 'Unclustered';
+    counts[c] = (counts[c] || 0) + 1;
+  }
+  return Object.entries(counts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+}
 
 export default function App() {
   const [url, setUrl] = useState('');
@@ -93,10 +105,24 @@ export default function App() {
 
   const fetchReels = async () => {
     try {
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('saved_reels')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(500);
+        if (error) throw error;
+        const mapped = (data || []).map(rowToRecord);
+        setReels(mapped);
+        setClusters(computeClusters(mapped));
+        return;
+      }
+      // Fallback: local FastAPI backend
       const response = await fetch(`${API_BASE_URL}/reels?limit=500`);
       if (response.ok) {
         const data = await response.json();
         setReels(data);
+        setClusters(computeClusters(data));
       }
     } catch (err) {
       console.error("Error fetching reels", err);
@@ -104,13 +130,17 @@ export default function App() {
   };
 
   const fetchClusters = async () => {
-    try {
-      const response = await fetch(`${API_BASE_URL}/clusters`);
-      if (response.ok) setClusters(await response.json());
-    } catch (err) {
-      console.error("Error fetching clusters", err);
-    }
+    // Clusters are derived from the loaded reels (see fetchReels/computeClusters).
+    // Kept as a callable so existing call sites (e.g. after recompute) still work.
   };
+
+  // While any reel is queued/processing, poll so it fills in once the worker finishes.
+  useEffect(() => {
+    const anyPending = reels.some(r => r.status && r.status !== 'done' && r.status !== 'failed');
+    if (!anyPending) return;
+    const id = setInterval(fetchReels, 5000);
+    return () => clearInterval(id);
+  }, [reels]);
 
   const handleRecompute = async () => {
     setIsRecomputing(true);
@@ -573,9 +603,11 @@ export default function App() {
               <option value="oldest">Oldest first</option>
             </select>
 
-            <button className="recompute-btn" onClick={handleRecompute} disabled={isRecomputing}>
-              {isRecomputing ? 'Clustering…' : 'Recompute clusters'}
-            </button>
+            {!isWakingUp && (
+              <button className="recompute-btn" onClick={handleRecompute} disabled={isRecomputing}>
+                {isRecomputing ? 'Clustering…' : 'Recompute clusters'}
+              </button>
+            )}
           </div>
         )}
 
@@ -621,9 +653,27 @@ export default function App() {
           <div className="reels-grid">
             {filteredReels.map((reel) => {
               const details = reel.extracted_json || {};
+              if (reel.status && reel.status !== 'done') {
+                return (
+                  <article key={reel.id} className="glass reel-card" style={{ opacity: 0.7 }}>
+                    <div className="card-header">
+                      <span className="card-topic-badge">
+                        {reel.status === 'processing' ? 'Processing…' : reel.status === 'failed' ? 'Failed' : 'Queued'}
+                      </span>
+                      <button className="delete-btn" title="Delete reel" onClick={(e) => handleDelete(reel.id, e)}>
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                    <h3 className="card-title">{reel.title || 'Queued reel'}</h3>
+                    {reel.url && (
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{reel.url}</p>
+                    )}
+                  </article>
+                );
+              }
               return (
-                <article 
-                  key={reel.id} 
+                <article
+                  key={reel.id}
                   className="glass glass-interactive reel-card"
                   onClick={() => {
                     setSelectedReel(reel);
