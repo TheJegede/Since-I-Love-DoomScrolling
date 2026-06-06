@@ -137,6 +137,7 @@ def test_cluster_chunking():
     items = [{"id": f"id{i}", "topic": f"topic {i % 3}"} for i in range(130)]
     calls = []
     orig_chunk = main._cluster_one_chunk
+    orig_merge = main._merge_cluster_names
     orig_delay = main.CLUSTER_CHUNK_DELAY
 
     def fake_chunk(chunk, existing):
@@ -144,6 +145,7 @@ def test_cluster_chunking():
         return [{"id": c["id"], "cluster": "C" + c["topic"][-1]} for c in chunk]
 
     main._cluster_one_chunk = fake_chunk
+    main._merge_cluster_names = lambda names: {}  # identity (no consolidation)
     main.CLUSTER_CHUNK_DELAY = 0
     try:
         import math
@@ -162,6 +164,49 @@ def test_cluster_chunking():
         print("[OK] cluster chunking passed!")
     finally:
         main._cluster_one_chunk = orig_chunk
+        main._merge_cluster_names = orig_merge
+        main.CLUSTER_CHUNK_DELAY = orig_delay
+
+
+def test_cluster_merge_pass():
+    print("Testing cluster_topics_with_llm consolidates fragmented names + dedups...")
+    import main
+    items = [{"id": f"id{i}", "topic": "t"} for i in range(4)]
+    orig_chunk = main._cluster_one_chunk
+    orig_merge = main._merge_cluster_names
+    orig_delay = main.CLUSTER_CHUNK_DELAY
+    main.CLUSTER_CHUNK_DELAY = 0
+
+    # Chunk returns fragmented AI-ish names + a duplicate id (id0 assigned twice)
+    def fake_chunk(chunk, existing):
+        out = [{"id": c["id"],
+                "cluster": "AI Tools" if int(c["id"]) % 2 == 0 else "AI Email Tools"}
+               for c in chunk]
+        out.append({"id": chunk[0]["id"], "cluster": "Dup"})  # duplicate id
+        return out
+
+    captured = {}
+
+    def fake_merge(names):
+        captured["names"] = sorted(names)
+        return {n: ("AI" if n.startswith("AI") else n) for n in names}
+
+    main._cluster_one_chunk = fake_chunk
+    main._merge_cluster_names = fake_merge
+    try:
+        out = main.cluster_topics_with_llm(items)
+        ids = [o["id"] for o in out]
+        # each id appears exactly once (duplicate collapsed, keep-first)
+        assert len(ids) == len(set(ids)) == 4, out
+        # fragmented AI names consolidated by the merge map
+        clusters = {o["id"]: o["cluster"] for o in out}
+        assert clusters["id0"] == "AI" and clusters["id2"] == "AI", out
+        # merge pass received the distinct fragmented names
+        assert "AI Tools" in captured["names"] and "AI Email Tools" in captured["names"]
+        print("[OK] cluster merge pass passed!")
+    finally:
+        main._cluster_one_chunk = orig_chunk
+        main._merge_cluster_names = orig_merge
         main.CLUSTER_CHUNK_DELAY = orig_delay
 
 
@@ -192,6 +237,7 @@ if __name__ == "__main__":
     test_extract_text_mock()
     test_recompute_clusters_mock()
     test_cluster_chunking()
+    test_cluster_merge_pass()
     test_list_clusters()
     test_reels_include_cluster()
     print("--- All tests completed successfully! ---")

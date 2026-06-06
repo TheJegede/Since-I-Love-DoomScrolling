@@ -189,12 +189,53 @@ def _cluster_one_chunk(chunk: List[dict], existing_clusters: List[str]) -> List[
         raise HTTPException(status_code=500, detail=f"Clustering failed: {str(e)}")
 
 
+def _merge_cluster_names(names: List[str]) -> dict:
+    """Consolidate many chunk-invented cluster names into a small canonical set.
+
+    Chunked clustering names each batch independently, producing near-duplicates
+    (e.g. 'AI Tools', 'AI Email Tools', 'Agentic AI'). This one small Groq call
+    operates on the *names only* (no token-budget risk) and returns a mapping
+    {original_name: canonical_name}. Monkeypatched in tests."""
+    if not groq_client:
+        raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
+
+    system_prompt = (
+        "You are a taxonomy editor. Given a list of cluster names, merge "
+        "near-duplicate or overlapping names into a smaller canonical set (aim for "
+        "about 8 to 15 total). Map every input name to exactly one canonical name "
+        "(a canonical name may be one of the inputs). Keep names short and "
+        "human-readable. Respond ONLY with valid JSON in exactly this shape, no "
+        "markdown or prose:\n"
+        '{"map": {"<original name>": "<canonical name>"}}'
+    )
+    user_prompt = "Cluster names (JSON):\n" + json.dumps(names)
+
+    try:
+        response = groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={"type": "json_object"},
+        )
+        data = json.loads(response.choices[0].message.content)
+        mapping = data.get("map", {})
+        if not isinstance(mapping, dict):
+            return {}
+        return {str(k): str(v) for k, v in mapping.items() if v}
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="Cluster merge model returned invalid JSON.")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Cluster merge failed: {str(e)}")
+
+
 def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
     """Group reel topics into emergent clusters, batching to stay under TPM limits.
 
     items: list of {"id": str, "topic": str}. Returns list of {"id", "cluster"}.
-    Real ids are mapped to short integer indices before each Groq call (smaller
-    payload) and mapped back afterward."""
+    Pipeline: shrink ids to indices -> cluster in paced chunks -> dedup (keep
+    first assignment per id) -> a merge pass consolidates fragmented names."""
     # Map real ids -> short indices to shrink the request payload
     idx_to_id = {}
     indexed = []
@@ -203,24 +244,34 @@ def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
         idx_to_id[idx] = it["id"]
         indexed.append({"id": idx, "topic": it.get("topic", "")})
 
-    assignments = []
+    raw = []
     known_clusters: List[str] = []
     for start in range(0, len(indexed), CLUSTER_CHUNK_SIZE):
         chunk = indexed[start:start + CLUSTER_CHUNK_SIZE]
         part = _cluster_one_chunk(chunk, known_clusters)
         for a in part:
-            assignments.append(a)
+            raw.append(a)
             name = a.get("cluster")
             if name and name not in known_clusters:
                 known_clusters.append(name)
         if start + CLUSTER_CHUNK_SIZE < len(indexed) and CLUSTER_CHUNK_DELAY:
             time.sleep(CLUSTER_CHUNK_DELAY)
 
-    # Map indices back to real ids; drop anything the model invented/dropped
+    # Dedup: keep the first valid assignment per id (guards duplicate ids)
+    seen = {}
+    for a in raw:
+        aid = a.get("id")
+        cluster = a.get("cluster")
+        if aid in idx_to_id and cluster and aid not in seen:
+            seen[aid] = cluster
+
+    # Merge pass: consolidate the fragmented names produced across chunks
+    distinct = list(dict.fromkeys(seen.values()))
+    merge_map = _merge_cluster_names(distinct) if len(distinct) > 1 else {}
+
     return [
-        {"id": idx_to_id[a["id"]], "cluster": a["cluster"]}
-        for a in assignments
-        if a.get("id") in idx_to_id and a.get("cluster")
+        {"id": idx_to_id[aid], "cluster": merge_map.get(cluster, cluster)}
+        for aid, cluster in seen.items()
     ]
 
 # Helper functions
