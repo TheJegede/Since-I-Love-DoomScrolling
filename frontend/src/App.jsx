@@ -389,7 +389,7 @@ export default function App() {
         <div className="wake-alert">
           <div className="wake-spinner"></div>
           <div>
-            <strong>Waking up extraction server...</strong> Hugging Face Space is initializing. Your first request may experience a short delay.
+            <strong>Connecting to local extraction server...</strong> Ingestion and cluster recomputation require the backend to be running locally.
           </div>
         </div>
       )}
