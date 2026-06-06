@@ -94,6 +94,45 @@ def delete_reel(reel_id: str) -> bool:
     return bool(res.data)
 
 
+def claim_next_pending() -> Optional[dict]:
+    """Atomically claim the oldest pending reel: flip it to 'processing' and
+    return the raw row. Returns None if the queue is empty or another worker
+    won the claim."""
+    c = get_client()
+    res = (c.table(TABLE).select("*")
+           .eq("status", "pending").order("created_at").limit(1).execute())
+    rows = res.data or []
+    if not rows:
+        return None
+    row = rows[0]
+    upd = (c.table(TABLE).update({"status": "processing"})
+           .eq("id", row["id"]).eq("status", "pending").execute())
+    if not upd.data:
+        return None  # lost the race
+    return row
+
+
+def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
+                       extracted_json, status: str = "done") -> None:
+    """Write pipeline results back onto an existing (claimed) row."""
+    get_client().table(TABLE).update({
+        "title": title,
+        "raw_transcript": raw_transcript,
+        "post_caption": post_caption,
+        "extracted_json": extracted_json,
+        "status": status,
+        "error": None,
+    }).eq("id", reel_id).execute()
+
+
+def mark_failed(reel_id: str, error) -> None:
+    """Mark a claimed row failed, recording a truncated error message."""
+    get_client().table(TABLE).update({
+        "status": "failed",
+        "error": str(error)[:500],
+    }).eq("id", reel_id).execute()
+
+
 def cluster_counts() -> list:
     res = get_client().table(TABLE).select("cluster").execute()
     counts = Counter((r.get("cluster") or "Unclustered") for r in (res.data or []))

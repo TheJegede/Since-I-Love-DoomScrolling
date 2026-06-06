@@ -199,6 +199,14 @@ def test_db_module_surface():
     print("[OK] db module surface passed!")
 
 
+def test_db_queue_surface():
+    print("Testing db.py exposes queue functions...")
+    import db
+    for fn in ("claim_next_pending", "update_reel_result", "mark_failed"):
+        assert hasattr(db, fn), f"db.{fn} missing"
+    print("[OK] db queue surface passed!")
+
+
 def test_extract_url_regression():
     print("Testing POST /extract/url via process_reel_url (mocked)...")
     import main
@@ -288,6 +296,7 @@ if __name__ == "__main__":
     test_cluster_chunking()
     test_cluster_merge_pass()
     test_db_module_surface()
+    test_db_queue_surface()
     test_extract_url_regression()
     test_delete_reel()
     test_list_clusters()
