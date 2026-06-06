@@ -130,6 +130,10 @@ def test_recompute_clusters_mock():
         print("[OK] recompute clusters passed!")
     finally:
         main.cluster_topics_with_llm = original
+        # Clean up seeded rows so tests never pollute the real DB
+        conn = sqlite3.connect(main.DB_PATH)
+        conn.execute("DELETE FROM saved_reels WHERE id IN (?, ?)", ids)
+        conn.commit(); conn.close()
 
 def test_cluster_chunking():
     print("Testing cluster_topics_with_llm chunks large inputs...")
@@ -210,6 +214,32 @@ def test_cluster_merge_pass():
         main.CLUSTER_CHUNK_DELAY = orig_delay
 
 
+def test_delete_reel():
+    print("Testing DELETE /reels/{id}...")
+    import main, sqlite3, uuid, json
+    rid = str(uuid.uuid4())
+    conn = sqlite3.connect(main.DB_PATH)
+    conn.execute(
+        "INSERT INTO saved_reels (id, url, title, raw_transcript, post_caption, extracted_json) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (rid, None, "to delete", None, None, json.dumps({"core_topic": "x"})),
+    )
+    conn.commit(); conn.close()
+
+    r = client.delete(f"/reels/{rid}")
+    assert r.status_code == 200, r.text
+    assert r.json()["deleted"] == rid
+
+    conn = sqlite3.connect(main.DB_PATH)
+    gone = conn.execute("SELECT COUNT(*) FROM saved_reels WHERE id=?", (rid,)).fetchone()[0]
+    conn.close()
+    assert gone == 0, "row not deleted"
+
+    # deleting a missing id -> 404
+    assert client.delete(f"/reels/{rid}").status_code == 404
+    print("[OK] delete reel passed!")
+
+
 def test_list_clusters():
     print("Testing GET /clusters...")
     r = client.get("/clusters")
@@ -238,6 +268,7 @@ if __name__ == "__main__":
     test_recompute_clusters_mock()
     test_cluster_chunking()
     test_cluster_merge_pass()
+    test_delete_reel()
     test_list_clusters()
     test_reels_include_cluster()
     print("--- All tests completed successfully! ---")

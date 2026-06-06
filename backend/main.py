@@ -523,6 +523,25 @@ def list_reels(
         logger.error(f"Error fetching reels from local SQLite: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch reels: {str(e)}")
 
+@app.delete("/reels/{reel_id}")
+def delete_reel(reel_id: str):
+    """Delete a single saved reel by id. 404 if it does not exist."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM saved_reels WHERE id = ?", (reel_id,))
+        conn.commit()
+        deleted = cursor.rowcount
+        conn.close()
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Reel not found.")
+        return {"deleted": reel_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
+
 @app.post("/clusters/recompute")
 def recompute_clusters():
     """Regroup all saved reels into emergent topic clusters via one LLM call."""

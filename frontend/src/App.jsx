@@ -20,7 +20,8 @@ import {
   UploadCloud,
   FileText as FileTextIcon,
   Sparkles,
-  Info
+  Info,
+  Trash2
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
@@ -126,6 +127,22 @@ export default function App() {
       setError(err.message);
     } finally {
       setIsRecomputing(false);
+    }
+  };
+
+  const handleDelete = async (id, e) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm('Delete this reel? This cannot be undone.')) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/reels/${id}`, { method: 'DELETE' });
+      if (!res.ok && res.status !== 404) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Delete failed.');
+      }
+      setReels(prev => prev.filter(r => r.id !== id));
+      if (selectedReel && selectedReel.id === id) setSelectedReel(null);
+    } catch (err) {
+      setError(err.message);
     }
   };
 
@@ -571,7 +588,7 @@ export default function App() {
           <table className="insights-table glass">
             <thead>
               <tr>
-                <th>Topic</th><th>Cluster</th><th>Key takeaway</th><th>Tools</th><th>Saved</th>
+                <th>Topic</th><th>Cluster</th><th>Key takeaway</th><th>Tools</th><th>Saved</th><th></th>
               </tr>
             </thead>
             <tbody>
@@ -586,6 +603,15 @@ export default function App() {
                       <span className="tool-chip" key={i}>{t}</span>
                     ))}</td>
                     <td>{formatDate(reel.created_at) || '—'}</td>
+                    <td>
+                      <button
+                        className="delete-btn"
+                        title="Delete reel"
+                        onClick={(e) => handleDelete(reel.id, e)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </td>
                   </tr>
                 );
               })}
@@ -607,7 +633,16 @@ export default function App() {
                 >
                   <div className="card-header">
                     <span className="card-topic-badge">{details.core_topic || 'Reel Extract'}</span>
-                    <span className="card-date">{formatDate(reel.created_at)}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <span className="card-date">{formatDate(reel.created_at)}</span>
+                      <button
+                        className="delete-btn"
+                        title="Delete reel"
+                        onClick={(e) => handleDelete(reel.id, e)}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
                   </div>
                   <h3 className="card-title">{reel.title || 'Untitled Extraction'}</h3>
                   <p className="card-takeaway">{details.key_takeaway}</p>
@@ -656,6 +691,13 @@ export default function App() {
                     View Original <ExternalLink size={14} />
                   </a>
                 )}
+                <button
+                  className="alt-input-btn delete-btn"
+                  style={{ fontSize: '0.85rem' }}
+                  onClick={(e) => handleDelete(selectedReel.id, e)}
+                >
+                  Delete <Trash2 size={14} />
+                </button>
               </div>
 
               <h2 className="modal-title">{selectedReel.title || "Extracted Insights"}</h2>
