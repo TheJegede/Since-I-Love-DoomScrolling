@@ -79,7 +79,7 @@
   transition: var(--transition-smooth);
 }
 .recompute-btn:hover:not(:disabled) {
-  background: hsl(263, 85%, 57%);
+  background: hsl(258, 67%, 58%);
   transform: translateY(-1px);
 }
 .recompute-btn:disabled { opacity: 0.6; cursor: not-allowed; }

@@ -4,26 +4,26 @@ name: Transcriber — Reels Insight Extractor (frontend)
 source: frontend/src/index.css + frontend/src/App.jsx + frontend/src/App.css (running at http://localhost:5173)
 captured_at: 2026-06-06
 description: |
-  A dark "aurora glassmorphism" dashboard for an AI tool that turns Instagram Reels into
-  structured insights. Near-black blue-tinted canvas with a slow-pulsing violet/pink radial
-  mesh, frosted translucent cards (backdrop-blur), and a single violet→pink gradient that
-  carries every accent — logo wordmark, CTAs, glowing icons, badges. Typeface is Plus Jakarta
-  Sans across 300–800. The look is premium-indie-AI: confident, glowy, motion-aware.
+  A restrained dark dashboard for an AI tool that turns Instagram Reels into structured
+  insights. Near-black blue-tinted canvas, flat solid surfaces with crisp hairline borders
+  and a faint top-edge highlight, and a single desaturated violet accent used only where it
+  means something (primary actions, active/focus states). Exactly ONE gradient survives — the
+  violet→pink logo wordmark. No motion, no glow. Typeface is Plus Jakarta Sans (300–800).
+  The voice is calm and deliberate, in the Linear/Vercel line — intention over decoration.
 
 colors:
   bg-dark: "#0E0E13"        # hsl(240 20% 6%) — app canvas
-  bg-card: "#13131B"        # hsl(240 21% 9%)
+  bg-card: "#13131B"        # hsl(240 21% 9%) — flat surface fill (cards, panels, table)
   bg-input: "#14141E99"     # rgba(20,20,30,0.6)
-  surface-glass: "#12121CB3" # rgba(18,18,28,0.7) — frosted card fill
-  primary: "#8B5CF6"        # hsl(263 85% 63%) — violet accent
-  secondary: "#EC4899"      # hsl(325 83% 58%) — pink accent
+  primary: "#8B66E1"        # hsl(258 67% 64%) — desaturated violet accent
+  secondary: "#DA62AE"      # hsl(322 62% 62%) — pink, used ONLY in the logo gradient
   success: "#21C45D"        # hsl(142 71% 45%)
   warning: "#F59E0B"        # hsl(38 92% 50%)
   text-primary: "#FAFAFA"   # hsl(0 0% 98%)
   text-secondary: "#BCBCC2" # hsl(240 5% 75%)
   text-muted: "#78788A"     # hsl(240 5% 50%)
-  border: "#FFFFFF14"       # rgba(255,255,255,0.08) — glass hairline
-  border-hover: "#8B5CF64D" # rgba(139,92,246,0.3)
+  border: "#FFFFFF1A"       # rgba(255,255,255,0.1) — hairline
+  border-hover: "#7C63DE59" # rgba(124,99,222,0.35)
 
 typography:
   display:
@@ -38,11 +38,11 @@ typography:
     lineHeight: 1.35
   section-title:
     fontFamily: "Plus Jakarta Sans, system-ui, sans-serif"
-    fontSize: 21.6px
+    fontSize: 22px
     fontWeight: 700
   card-title:
     fontFamily: "Plus Jakarta Sans, system-ui, sans-serif"
-    fontSize: 18.4px
+    fontSize: 18px
     fontWeight: 700
     lineHeight: 1.4
   body:
@@ -52,7 +52,7 @@ typography:
     lineHeight: 1.5
   label-eyebrow:
     fontFamily: "Plus Jakarta Sans, system-ui, sans-serif"
-    fontSize: 16.8px
+    fontSize: 17px
     fontWeight: 700
     letterSpacing: 0.5px
     textTransform: uppercase
@@ -74,8 +74,9 @@ rounded:
 
 components:
   glass-card:
-    backgroundColor: "{colors.surface-glass}"
+    backgroundColor: "{colors.bg-card}"
     border: "1px solid {colors.border}"
+    highlight: "inset 0 1px 0 rgba(255,255,255,0.03)"
     rounded: "{rounded.lg}"
     padding: 28px
   button-primary:
@@ -87,16 +88,17 @@ components:
   input-group:
     backgroundColor: "{colors.bg-input}"
     border: "1px solid {colors.border}"
+    focusRing: "0 0 0 2px rgba(124,99,222,0.25)"
     rounded: "{rounded.md}"
     padding: 8px
   topic-badge:
-    backgroundColor: "#8B5CF61A"
-    textColor: "{colors.primary}"
-    border: "1px solid #8B5CF633"
+    backgroundColor: "rgba(255,255,255,0.06)"
+    textColor: "{colors.text-secondary}"
+    border: "1px solid {colors.border}"
     rounded: "{rounded.pill}"
     padding: 4px 10px
   search-bar:
-    backgroundColor: "{colors.surface-glass}"
+    backgroundColor: "{colors.bg-card}"
     border: "1px solid {colors.border}"
     rounded: "{rounded.sm}"
     padding: 10px 16px
@@ -105,23 +107,23 @@ components:
 # Design Analysis — Transcriber (Reels Insight Extractor)
 
 > Analysis generated with the `anydesign` skill.
-> Date: 2026-06-06
-> Analysis emphasis: design system + reconstruction (goal: improve the UI)
+> Date: 2026-06-06 (refreshed after the "restraint pass")
+> Analysis emphasis: design system + reconstruction
 
 ---
 
 ## Source
 
 - **Source type**: combination — codebase + running URL
-- **Path / URL**: `frontend/src/index.css` (token source), `frontend/src/App.jsx` (structure), `frontend/src/App.css` (recent additions), live at `http://localhost:5173`
-- **Capture method**: direct source reading of CSS custom properties — highest fidelity, no visual approximation needed
-- **Detected limitations**: tokens read from source, not a rendered screenshot; HSL→hex conversions are approximate (the HSL/rgba originals are exact and authoritative).
+- **Path / URL**: `frontend/src/index.css` (token source), `frontend/src/App.jsx` (structure), `frontend/src/App.css` (controls/table), live at `http://localhost:5173`
+- **Capture method**: direct source reading of CSS custom properties — highest fidelity.
+- **Detected limitations**: HSL→hex conversions are approximate (the HSL/rgba originals in `index.css` are authoritative).
 
 ---
 
 ## TL;DR
 
-A dark, glowy "aurora glassmorphism" AI dashboard: near-black blue canvas, a slow-pulsing violet/pink radial mesh, and frosted translucent cards. One violet→pink gradient (`{colors.primary}` #8B5CF6 → `{colors.secondary}` #EC4899) carries the entire brand. **The actionable problem: the newest UI (the clustering controls — view toggle, filter dropdowns, recompute button) was added with hardcoded light-theme values (`#fff`, `#111`, `#ccc`, `#4f46e5`) and unstyled native `<select>`s, so it visually clashes with the otherwise-cohesive dark system.** Fixing that one band of controls is the highest-leverage UI win.
+A calm, restrained dark dashboard: near-black blue canvas, flat solid cards with crisp hairlines and a faint top highlight, and **one** desaturated violet accent (`{colors.primary}` #8B66E1) reserved for primary actions and focus/active states. The only gradient in the entire system is the violet→pink logo wordmark; there is no motion and no glow. This is a deliberate post-"AI-slop" cleanup — depth now comes from typography, spacing, and hairlines rather than gradients and animation.
 
 ---
 
@@ -129,30 +131,30 @@ A dark, glowy "aurora glassmorphism" AI dashboard: near-black blue canvas, a slo
 
 ### 1.1 Surface description
 
-**Personality**: glowy, premium, motion-aware, focused, indie-AI.
+**Personality**: calm, deliberate, precise, focused, engineered.
 
-**Mood**: a calm dark "command surface" that feels alive (ambient animated mesh, pulsing logo glow) without being noisy.
+**Mood**: a quiet dark "instrument" — confident without shouting; the single accent does the talking.
 
-**Detectable stylistic references**: Linear's dark restraint crossed with Vercel/AI-startup gradient glow; glassmorphism (frosted `backdrop-filter: blur(16px)`).
+**Detectable stylistic references**: Linear / Vercel restraint; flat-first dark UI with selective depth.
 
-**Information density**: balanced — generous padding (28–40px), a bento-style auto-fill card grid, lots of breathing room.
+**Information density**: balanced — generous padding (28–40px), bento auto-fill card grid, intentional whitespace, hairline section dividers.
 
-**Implicit positioning**: a single power-user / maker who saves educational Reels. Personal-tool polish, not enterprise.
+**Implicit positioning**: a single power-user / maker who saves educational Reels. Personal-tool craft, not enterprise.
 
 **Confidence**: ✅ high (read from source).
 
 ### 1.2 Brand voice / Atmosphere
 
-This design believes its user is a focused maker who lives in dark tools and judges software by feel. Every choice serves "this is a premium AI instrument, not a CRUD form": the canvas is near-black so the violet glow reads as energy; cards are frosted glass so content feels layered over an atmosphere rather than stamped on a page; the background mesh *moves* on a 20s loop so the surface feels live even when idle. The pipeline step-tracker (Server Check → Fetch → Transcribe → Llama → Save) turns a backend POST into a visible, almost cinematic process — the product wants you to *watch the AI work*.
+This design believes its user is a focused maker who reads software by its restraint. After an earlier glow-and-gradient phase, the system was deliberately pulled back to a flat-first dark surface: solid cards, hairline borders, a single faint inset top-highlight for craft, and exactly one accent color. The conviction is that *intention reads as quality* — a violet that appears only on the primary button, the active toggle, and focus rings feels considered, where a violet on every surface read as generated.
 
-The restraint is deliberate: outside the one gradient and its glows, everything is neutral (text, hairline borders, translucent fills). That discipline is what makes the violet feel expensive instead of gaudy. The recent clustering controls break this contract — they reach for raw browser defaults instead of the atmosphere, which is exactly why they look "bolted on."
+Motion was removed for the same reason: the animated mesh and pulsing logo were atmosphere for atmosphere's sake. The product now lets hierarchy come from type weight (Plus Jakarta 800 vs 400) and spacing. The one indulgence kept — the violet→pink gradient on the logo wordmark — survives precisely *because* it is the only one; it carries the brand alone.
 
 ### 1.3 The "ONE brand thing"
 
-- **The thing**: the **violet→pink gradient + its glow** (`linear-gradient(135deg, #8B5CF6, #EC4899)`), applied as text-fill on the logo, as the primary button, and as drop-shadow glows on the logo icon and focus rings.
-- **Why it carries the brand**: strip the gradient/glow and you have a generic dark admin panel. It is the only saturated color in the system; it does 100% of the brand work.
-- **How everything else supports it**: canvas, cards, text, and borders are all desaturated neutrals specifically so the gradient has no competition.
-- **Where it appears (and where it doesn't)**: hero wordmark, primary CTA, active pipeline node, focus rings, badges. It deliberately does *not* appear as large background fills (only as low-opacity mesh/glow). 
+- **The thing**: the **violet→pink gradient on the logo wordmark** (`linear-gradient(135deg, #8B66E1, #DA62AE)` clipped to text). It is now the single gradient in the whole product.
+- **Why it carries the brand**: it is the only saturated, only gradient, only "expressive" gesture. Remove it and the UI is a tasteful but anonymous dark dashboard.
+- **How everything else supports it**: every other surface is flat neutral; the accent elsewhere is a flat, desaturated single violet. Nothing competes.
+- **Where it appears (and where it doesn't)**: logo wordmark only. It deliberately does NOT appear on buttons, badges, banners, or backgrounds anymore.
 
 *Confidence*: ✅ high.
 
@@ -165,77 +167,70 @@ The restraint is deliberate: outside the one gradient and its glows, everything 
 | Token | Value (authoritative) | Hex approx | Role | Where | Confidence |
 |---|---|---|---|---|---|
 | `bg-dark` | `hsl(240 20% 6%)` | `#0E0E13` | App canvas | `body` | ✅ |
-| `bg-card` | `hsl(240 21% 9%)` | `#13131B` | Solid card / node fill | step-node | ✅ |
-| `bg-input` | `rgba(20,20,30,0.6)` | `#14141E99` | Input fields | url-input, textarea | ✅ |
-| `surface-glass` | `rgba(18,18,28,0.7)` | `#12121CB3` | Frosted card fill | `.glass` | ✅ |
-| `primary` | `hsl(263 85% 63%)` | `#8B5CF6` | Accent, CTA, links | buttons, badges, glow | ✅ |
-| `secondary` | `hsl(325 83% 58%)` | `#EC4899` | Gradient end | logo, CTA gradient | ✅ |
+| `bg-card` | `hsl(240 21% 9%)` | `#13131B` | Flat surface fill | cards, panels, table, search | ✅ |
+| `bg-input` | `rgba(20,20,30,0.6)` | `#14141E99` | Input fields, selects | url-input, controls | ✅ |
+| `primary` | `hsl(258 67% 64%)` | `#8B66E1` | Accent — CTA, active, focus | buttons, toggle, rings | ✅ |
+| `secondary` | `hsl(322 62% 62%)` | `#DA62AE` | Logo gradient end ONLY | `.logo-text` | ✅ |
 | `success` | `hsl(142 71% 45%)` | `#21C45D` | Completed steps | step.completed | ✅ |
 | `warning` | `hsl(38 92% 50%)` | `#F59E0B` | Wake-up alert | `.wake-alert` | ✅ |
 | `text-primary` | `hsl(0 0% 98%)` | `#FAFAFA` | Main text | headings, body | ✅ |
-| `text-secondary` | `hsl(240 5% 75%)` | `#BCBCC2` | Secondary text | takeaways, labels | ✅ |
-| `text-muted` | `hsl(240 5% 50%)` | `#78788A` | Tertiary text | dates, captions | ✅ |
-| `border` | `rgba(255,255,255,0.08)` | `#FFFFFF14` | Glass hairline | card borders | ✅ |
-| `border-hover` | `rgba(139,92,246,0.3)` | `#8B5CF64D` | Hover border | interactive glass | ✅ |
+| `text-secondary` | `hsl(240 5% 75%)` | `#BCBCC2` | Secondary text | takeaways, chips | ✅ |
+| `text-muted` | `hsl(240 5% 50%)` | `#78788A` | Tertiary text | dates, captions, th | ✅ |
+| `border` | `rgba(255,255,255,0.1)` | `#FFFFFF1A` | Hairline | borders, dividers | ✅ |
+| `border-hover` | `rgba(124,99,222,0.35)` | `#7C63DE59` | Hover border | interactive surfaces | ✅ |
 
-**Off-system colors found (the problem set)** — in `App.css`, the clustering controls hardcode values that exist nowhere else: `#fff`, `#111`, `#ccc` (view-toggle), `#4f46e5` (recompute button — indigo, not the brand violet `#8B5CF6`), and ad-hoc `rgba(120,130,255,…)` / `rgba(110,231,150,…)` chips. These should map to existing tokens. ⚠️
+The system is now a **single-accent** palette: text + neutrals + one violet + feedback semantics (success/warning). Pink exists only inside the logo gradient.
 
 ### 2.2 Typography
 
-- **Detected family**: `Plus Jakarta Sans` (imported from Google Fonts, weights 300–800) — ✅ high (explicit `@import`).
+- **Family**: `Plus Jakarta Sans` (Google Fonts, 300–800) — ✅ high (explicit `@import`).
 - **Fallback**: `-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`.
 
 | Token | Size | Weight | Line-height | Use |
 |---|---|---|---|---|
-| `display` | 2.25rem / 36px | 800 | — | Logo wordmark (gradient text) |
-| `modal-title` | 1.75rem / 28px | 800 | 1.35 | Modal heading |
-| `section-title` | 1.35rem / ~22px | 700 | — | Dashboard / "Saved Insights" |
-| `card-title` | 1.15rem / ~18px | 700 | 1.4 | Card titles (2-line clamp) |
-| `body` | 1rem / 16px | 400–500 | 1.5 | Body, inputs |
-| `label-eyebrow` | 1.05rem / ~17px | 700 | — | Modal section titles (UPPERCASE, +0.5px tracking) |
-| `caption` | 0.75rem / 12px | 500 | — | Dates, step labels |
+| `display` | 36px | 800 | — | Logo wordmark (only gradient text) |
+| `modal-title` | 28px | 800 | 1.35 | Modal heading |
+| `section-title` | ~22px | 700 | — | Dashboard / "Saved Insights" |
+| `card-title` | ~18px | 700 | 1.4 | Card titles (2-line clamp) |
+| `body` | 16px | 400–500 | 1.5 | Body, inputs |
+| `label-eyebrow` | ~17px | 700 | — | Modal section titles (UPPERCASE, +0.5px) |
+| `caption` | 12px | 500 | — | Dates, step + table-header labels |
 
-**Notable**: display/logo uses negative tracking (-0.5px); modal section titles are the only uppercase + positive-tracking style (eyebrow voice).
+Hierarchy is now carried by weight/size contrast, not color. Uppercase is reserved for the modal eyebrow labels only.
 
 ### 2.3 Spacing
 
-- **Base unit**: 4px, but expressed in `rem` (0.25rem). Common steps: 0.5/0.75/1/1.5/1.75/2/2.5rem (8/12/16/24/28/32/40px).
-- **Consistency**: ✅ high in `index.css`; ⚠️ the new `App.css` controls use a looser ad-hoc set (0.4rem/0.6rem/0.9rem) that doesn't align to the scale.
+- **Base**: 4px, expressed in `rem`. Steps: 8/12/16/24/28/32/40px. **Consistency**: ✅ high.
 
 ### 2.4 Radii
 
-- `sm`: 8px (buttons, inputs, tags, search) — `{rounded.sm}`
-- `md`: 12px (input group, upload zone, progress) — `{rounded.md}`
-- `lg`: 16px (cards, modal) — `{rounded.lg}`
-- `pill`: 20px (topic badge) — `{rounded.pill}`
-- `full`: 9999px (step-node circle, spinner)
+- `sm` 8px (buttons, inputs, tags, search), `md` 12px (input group, upload, progress), `lg` 16px (cards, modal), `pill` 20px (badges), `full` 9999px (step nodes).
 
 ### 2.5 Elevation system
 
-Glass + glow, not classic drop-shadow tiers.
+Flat-first. Depth = hairline + a 1px inset top highlight; real blur is reserved for the modal.
 
 | Level | Name | Treatment | Use |
 |---|---|---|---|
 | 0 | Flat | no chrome | body canvas |
-| 1 | Glass hairline | `blur(16px)` + `1px solid {colors.border}` | default cards |
-| 2 | Glow hover | `0 8px 30px rgba(0,0,0,0.4), 0 0 15px rgba(139,92,246,0.05)` + violet border | `.glass-interactive:hover` |
-| 3 | Focus glow | `--shadow-glow: 0 0 20px rgba(139,92,246,0.25)` | focused inputs, primary CTA hover |
-| 4 | Modal | `0 20px 50px rgba(0,0,0,0.6)` over `blur(12px)` backdrop | dialogs |
+| 1 | Crafted surface | `bg-card` + `1px {colors.border}` + `inset 0 1px 0 rgba(255,255,255,0.03)` | default cards/panels |
+| 2 | Hover | violet hairline + `inset highlight, 0 6px 22px rgba(0,0,0,0.35)` | `.glass-interactive:hover` |
+| 3 | Focus | crisp `0 0 0 2px rgba(124,99,222,0.25)` ring + violet border | inputs, selects |
+| 4 | Modal | `0 20px 50px rgba(0,0,0,0.6)` over a `blur(12px)` **overlay** | dialogs |
 
 #### Decorative depth (non-functional)
 
-- **Animated aurora mesh**: fixed full-bleed `body::before` with three radial-gradients (indigo/pink/violet) animating position+scale on a 20s `backgroundPulse` loop. This is the signature atmosphere.
-- **Logo glow**: `logoGlow` drop-shadow animation (3s) on the logo icon.
-- **Gradient text**: logo wordmark uses `background-clip: text` over the violet→pink gradient.
+- **Single static wash**: one fixed low-opacity radial `rgba(124,99,222,0.06)` top-left on `body::before`. No animation. (The previous 3-gradient pulsing mesh + logo-glow animation were removed.)
 
 ### 2.6 Borders
 
-- Base: `rgba(255,255,255,0.08)` 1px hairline.
-- Hover/focus: violet — `rgba(139,92,246,0.3)` border or `--shadow-glow` ring.
+- Hairline: `rgba(255,255,255,0.1)` 1px, used for card borders and the dashboard header divider.
+- Hover: violet `rgba(124,99,222,0.35)`.
+- Focus: crisp 2px violet ring (`rgba(124,99,222,0.25)`) — not a blurred glow.
 
 ### 2.7 Accessibility quick-check
 
-See companion `design-a11y.md`. Headlines on canvas are strong (`text-primary` on `bg-dark` ≈ 18:1, AAA). Watch `text-muted` (#78788A) on glass — borderline for small text. The off-system `view-toggle` (white bg, #111 text) is high-contrast but wrong-theme.
+See companion `design-a11y.md`. `text-primary` on canvas ≈ 18:1 (AAA ✅). Watch `text-muted` (#78788A) on `bg-card` for small text (borderline AA). The desaturated violet on dark improves slightly over the old neon.
 
 ---
 
@@ -244,138 +239,126 @@ See companion `design-a11y.md`. Headlines on canvas are strong (`text-primary` o
 ### 3.1 Generic components
 
 #### button-primary
-- **Variants**: primary (violet→pink gradient), ghost/alt (`.alt-input-btn`, transparent violet text).
-- **States**: default, hover (`translateY(-2px)` + glow), disabled (opacity 0.6).
-- **Padding**: 12px 28px. **Radius**: `{rounded.sm}` (8px). **Confidence**: ✅.
+- **Variants**: primary (**solid** `{colors.primary}`), ghost/alt (`.alt-input-btn`, transparent violet text).
+- **States**: default, hover (darken to `hsl(258 67% 58%)` + `translateY(-1px)`, no glow), disabled (opacity 0.6).
+- **Padding**: 12px 28px. **Radius**: `{rounded.sm}`. **Confidence**: ✅.
 
 #### input-group
-- Frosted group with left icon; `:focus-within` → violet border + `--shadow-glow`. ✅
+- Frosted-free dark group with left icon; `:focus-within` → violet border + crisp 2px ring. ✅
 
 #### search-bar
-- Glass pill, icon + transparent input, max-width 400px. ✅
+- Flat `bg-card` pill, icon + transparent input, max-width 400px. ✅
 
 #### glass-card (`.reel-card` on `.glass`)
-- Topic badge (pill) + date, 2-line clamped title, 3-line takeaway, footer with task count + "View details". Hover lifts the read-more arrow gap. ✅
+- Flat `bg-card` + hairline + inset top highlight; neutral topic badge + date, 2-line title, 3-line takeaway, footer with task count + "View details". Hover = violet hairline + soft shadow. ✅
 
 #### topic-badge
-- `topic-badge` (violet pill for cluster/topic), `tool-tag` (neutral glass chip with hover lift + copy icon). ✅
-
-#### Modal
-- Centered, `scaleUp` spring entrance, blurred overlay, close button rotates 90° on hover, takeaway banner with gradient + left accent bar, action checklist, tool tags, transcript accordion. ✅
+- Neutral light chip (`rgba(255,255,255,0.06)`, `text-secondary`) for topic/cluster; `tool-tag`/`tool-chip` are the same neutral family. Color is no longer used decoratively. ✅
 
 ### 3.2 Signature components
 
-#### Aurora mesh canvas
-- **What**: animated multi-radial-gradient fixed background.
-- **Why signature**: it's the brand atmosphere; remove it and the app goes flat.
-- **Composition**: `body::before`, three radial-gradients, 20s `backgroundPulse`.
-- **Confidence**: ✅.
-
 #### Pipeline step-tracker
-- **What**: 6-node horizontal progress (Server→Fetch→Audio→Transcribe→Llama→Save) with active/completed states (violet glow / green).
-- **Why signature**: turns a single API call into a watchable AI process; unique to this product.
-- **Confidence**: ✅.
+- 6-node horizontal progress (Server→Fetch→Audio→Transcribe→Llama→Save); active = violet border/fill (no glow), completed = green. Turns a single API call into a watchable process. ✅
 
-#### Gradient-text glowing logo
-- Wordmark in clipped violet→pink gradient + pulsing glow icon. ✅
+#### Gradient-text logo
+- Wordmark in clipped violet→pink gradient — the lone gradient and the brand's one expressive gesture. ✅
+
+*(The animated aurora mesh was removed in the restraint pass and is no longer a signature element.)*
 
 ---
 
 ## 4. Layout & Composition
 
 ### 4.1 Grid & containers
-- `.app-container` max-width **1200px**, padding 2.5rem 1.5rem, centered.
-- Card grid: `repeat(auto-fill, minmax(340px, 1fr))`, 1.75rem gap (bento auto-fill).
+- `.app-container` max-width 1200px, padding 2.5rem 1.5rem, centered.
+- Card grid: `repeat(auto-fill, minmax(340px, 1fr))`, 1.75rem gap.
+- Dashboard header separated from results by a hairline divider.
 
 ### 4.2 Composition patterns
-- Centered hero (logo + subtitle) → ingestion panel (glass) → dashboard (search + controls + grid/table) → modal overlay.
+- Centered hero (logo + subtitle) → ingestion panel → dashboard (search + controls + cards/table toggle) → modal overlay.
 
 ### 4.3 Responsive behavior
 
 | Name | Width | Key changes |
 |---|---|---|
-| Mobile | < 640px | `.dashboard-controls` stack vertically |
+| Mobile | < 640px | `.dashboard-controls` stack |
 | Tablet | < 768px | step-tracker → 1 column |
-| Desktop | ≥ 768px | full 6-up step grid, multi-col card grid |
+| Desktop | ≥ 768px | full 6-up steps, multi-col grid |
 
-Card grid is intrinsically responsive via `auto-fill minmax(340px,…)`. ⚠️ The new `.controls-bar` uses `flex-wrap` only — acceptable, but the native `<select>`s are not theme-aware on any width.
+Card grid is intrinsically responsive (`auto-fill minmax(340px,…)`). Controls wrap via flex.
 
 #### Touch targets
-- CTAs/inputs ~44–48px ✅. ⚠️ view-toggle buttons (~32px tall) and select height are a touch small.
+- CTAs/inputs ~44–48px ✅. ⚠️ view-toggle (~32px) and selects are a touch small — candidate for a future bump.
 
 ### 4.4 Image behavior
-- Effectively imageless app (icon-driven). Icons: **lucide-react** (stroke icons). Note the lucide v1.17 build dropped brand icons — `Clapperboard` replaced the removed `Instagram` glyph.
+- Effectively imageless; icon-driven via **lucide-react** (stroke icons; `Clapperboard` replaces the removed `Instagram` glyph).
 
 ---
 
 ## 5. Reconstruction Notes
 
 ### Suggested stack
-Vanilla CSS with CSS custom properties (current approach) — no framework needed. The token layer in `index.css` is already a clean design system; the fix is to *use* it everywhere.
+Vanilla CSS with custom properties (current). The token layer in `index.css` is the system; components consume it.
 
-### Quick wins (the UI improvement work)
-1. **Re-skin the clustering controls to the token system** — replace `App.css` lines 187–200 hardcoded values with `var(--glass-bg)`, `var(--accent-primary)`, `var(--radius-*)`, `var(--text-*)`. Style the native `<select>` (dark bg, hairline border, custom arrow) or swap for a styled dropdown.
-2. **Recolor the recompute button** from `#4f46e5` to the brand gradient (reuse `.btn-primary`).
-3. **Delete dead CSS**: `App.css` lines 1–184 are unused Vite-template styles (`.hero`, `.counter`, `#next-steps`, `#docs`, `.ticks`).
-4. **Promote the table into the glass system**: give `.insights-table` a `.glass` wrapper, violet hover rows, and reuse `tool-tag`/`topic-badge` instead of the one-off `tool-chip`/`cluster-pill`.
+### Quick wins
+- The restraint pass is implemented: single gradient, flat surfaces, neutral chips, crisp rings, no motion.
 
 ### Tricky bits
-- The animated mesh + `backdrop-filter` can be GPU-heavy; keep blur values as-is, don't stack more.
-- Native `<select>` styling on dark themes needs the custom-arrow + `option` background treatment (browsers vary).
+- Keep the modal overlay as the *only* `backdrop-filter` — don't reintroduce blur on cards.
+- Native `<select>` is themed via custom chevron + `option` background; verify across browsers.
 
 ### Implicit states to define
-- Active filter "chip" state, empty-cluster state ("Run Recompute"), recompute error toast (currently only `setError`), table empty/filtered-to-zero state.
+- Active-filter chip state, empty-cluster state ("Run Recompute"), recompute error toast (currently `setError` only), table filtered-to-zero state.
 
 ### Confidence map
 
 | Layer | Confidence | Why |
 |---|---|---|
-| Identity | ✅ high | Read from source + clear patterns |
-| Colors | ✅ high | CSS vars are authoritative |
-| Typography | ✅ high | Explicit font import + sizes |
+| Identity | ✅ high | Read from source |
+| Colors | ✅ high | CSS vars authoritative |
+| Typography | ✅ high | Explicit import + sizes |
 | Spacing | ✅ high | Read from source |
 | Components | ✅ high | Full CSS available |
 | Layout | ✅ high | Containers/grids explicit |
-| New controls | ⚠️ flagged | Off-system by construction |
 
 ---
 
 ## 6. Do's and Don'ts
 
 ### Do
-- **Pull every color from `index.css` variables** (`var(--accent-primary)`, `var(--glass-bg)`, `var(--text-secondary)`) — never hardcode hex in component CSS.
-- **Reserve the violet→pink gradient for primary actions and brand marks** (logo, primary CTA, active states). Reuse `.btn-primary` for the recompute button.
-- **Wrap new surfaces in `.glass`** (cards, tables, panels) so they inherit blur + hairline + radius.
-- **Use the radius scale**: `--radius-sm` (8px) for controls/tags, `--radius-md` (12px) for inputs/panels, `--radius-lg` (16px) for cards/modals.
-- **Reuse existing chips**: `topic-badge` for clusters, `tool-tag` for tools — don't invent `cluster-pill`/`tool-chip` parallels.
-- **Keep accents desaturated-neutral around the gradient** so violet stays the only saturated voice.
-- **Style interactive hover as a violet border/glow** (`--glass-border-hover`, `--shadow-glow`), matching cards and inputs.
+- **Keep the gradient on the logo wordmark only.** It is the one expressive gesture; everything else is flat.
+- **Use the solid violet `{colors.primary}` (#8B66E1) for primary actions, active, and focus** — nowhere decorative.
+- **Build surfaces from `.glass`** (now flat `bg-card` + hairline + inset top highlight); reuse it for cards, panels, tables.
+- **Reserve `backdrop-filter` blur for the modal overlay** — the single depth moment.
+- **Use neutral chips** (`rgba(255,255,255,0.06)`) for topics/clusters/tools; reserve color for status (success/warning).
+- **Show focus as a crisp 2px violet ring** (`rgba(124,99,222,0.25)`), never a blurred glow.
+- **Drive hierarchy with type weight and spacing** (800 vs 400) plus hairline dividers.
 
 ### Don't
-- **Don't introduce new accent colors** (`#4f46e5` indigo, `rgb(120,130,255)`, `rgb(110,231,150)`) — they fracture the single-gradient identity.
-- **Don't ship unstyled native `<select>`** on the dark theme — default white dropdowns break the atmosphere.
-- **Don't use light-on-light controls** (white bg / `#111` text) anywhere — the system is dark-first.
-- **Don't add heavy single drop-shadows**; the system layers soft glow + hairline.
-- **Don't leave the dead Vite-template CSS** in `App.css` — it's confusing and unused.
-- **Don't put body/long text in uppercase**; uppercase is reserved for the modal eyebrow labels only.
+- **Don't add a second gradient** anywhere outside the logo — buttons, badges, banners stay solid.
+- **Don't reintroduce ambient motion** (pulsing meshes, glowing logos) — it reads as AI-generated.
+- **Don't use glow/drop-shadow as decoration** — depth is hairline + inset highlight + one soft modal shadow.
+- **Don't color chips by vibe** — violet/decorative pills are out; color must carry meaning.
+- **Don't apply `backdrop-filter` to cards or the table** — only the modal overlay.
+- **Don't introduce a third accent** — the system is text + neutral + one violet + feedback semantics.
 
 ---
 
 ## 7. Open Questions
 
-- Is there a light mode planned? Nothing in source suggests one — the system is dark-only.
-- Should the table view fully adopt card-grid visual weight, or stay a denser "spreadsheet" on purpose? (Affects how much glass to apply.)
-- Is a styled custom dropdown component wanted, or is a CSS-themed native `<select>` acceptable?
-- Recompute currently surfaces errors via `setError` only — is a toast/inline-banner pattern desired (none exists yet)?
+- Light mode is loosely on your mind — do you want a real `prefers-color-scheme` / toggle, or stay dark-only? (Tokens are centralized in `index.css`, so a light theme is feasible later.)
+- Bump small touch targets (view-toggle, selects) to ≥40px height?
+- Recompute errors only set `setError` — add a visible inline banner/toast?
+- Should the neutral topic/cluster chips ever encode anything (e.g., color per cluster), or stay strictly neutral?
 
 ---
 
 ## 8. Companion files
 
-- [x] `design-tokens.json` — DTCG tokens (`$value`/`$type`) for the system above
+- [x] `design-tokens.json` — DTCG tokens for the restrained system
 - [x] `design-a11y.md` — WCAG contrast for key pairs
-- [ ] `design-screenshot.png` — not generated (analysis done from authoritative source)
+- [ ] `design-screenshot.png` — not generated (analysis from authoritative source)
 
 ---
 
-*Next logical step (emphasis = improve UI): convert Section 5 "Quick wins" + Section 6 rules into a focused refactor of `App.css` so the clustering controls join the design system. Say the word and I'll implement it.*
+*Next logical step: if you want a light mode, this token layer is ready for it — say the word and I'll add a `prefers-color-scheme` variant.*

@@ -10,8 +10,8 @@
       "glass": { "$value": "rgba(18,18,28,0.7)", "$type": "color", "$description": "frosted card fill (.glass)" }
     },
     "accent": {
-      "primary":   { "$value": "#8B5CF6", "$type": "color", "$description": "hsl(263 85% 63%) violet — CTA, links, glow", "$extensions": { "confidence": "high" } },
-      "secondary": { "$value": "#EC4899", "$type": "color", "$description": "hsl(325 83% 58%) pink — gradient end" },
+      "primary":   { "$value": "#8B66E1", "$type": "color", "$description": "hsl(258 67% 64%) desaturated violet — CTA, active, focus (solid only)", "$extensions": { "confidence": "high" } },
+      "secondary": { "$value": "#DA62AE", "$type": "color", "$description": "hsl(322 62% 62%) pink — used ONLY in the logo gradient" },
       "success":   { "$value": "#21C45D", "$type": "color", "$description": "hsl(142 71% 45%)" },
       "warning":   { "$value": "#F59E0B", "$type": "color", "$description": "hsl(38 92% 50%)" }
     },
@@ -21,12 +21,12 @@
       "muted":     { "$value": "#78788A", "$type": "color" }
     },
     "border": {
-      "default": { "$value": "rgba(255,255,255,0.08)", "$type": "color" },
-      "hover":   { "$value": "rgba(139,92,246,0.3)", "$type": "color" }
+      "default": { "$value": "rgba(255,255,255,0.1)", "$type": "color" },
+      "hover":   { "$value": "rgba(124,99,222,0.35)", "$type": "color" }
     }
   },
   "gradient": {
-    "brand": { "$value": "linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)", "$type": "gradient", "$description": "The ONE brand thing — violet to pink" }
+    "brand": { "$value": "linear-gradient(135deg, #8B66E1 0%, #DA62AE 100%)", "$type": "gradient", "$description": "The ONE brand thing — logo wordmark only; the single gradient in the system" }
   },
   "typography": {
     "fontFamily": { "$value": "Plus Jakarta Sans, system-ui, sans-serif", "$type": "fontFamily" },
@@ -55,8 +55,9 @@
     "full": { "$value": "9999px", "$type": "dimension" }
   },
   "shadow": {
-    "glow":       { "$value": "0 0 20px rgba(139,92,246,0.25)", "$type": "shadow" },
-    "card-hover": { "$value": "0 8px 30px rgba(0,0,0,0.4), 0 0 15px rgba(139,92,246,0.05)", "$type": "shadow" },
-    "modal":      { "$value": "0 20px 50px rgba(0,0,0,0.6)", "$type": "shadow" }
+    "surface-highlight": { "$value": "inset 0 1px 0 rgba(255,255,255,0.03)", "$type": "shadow", "$description": "crafted top edge on flat surfaces" },
+    "focus-ring":        { "$value": "0 0 0 2px rgba(124,99,222,0.25)", "$type": "shadow", "$description": "crisp violet focus ring (no blur/glow)" },
+    "card-hover":        { "$value": "inset 0 1px 0 rgba(255,255,255,0.04), 0 6px 22px rgba(0,0,0,0.35)", "$type": "shadow" },
+    "modal":             { "$value": "0 20px 50px rgba(0,0,0,0.6)", "$type": "shadow" }
   }
 }
