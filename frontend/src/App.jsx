@@ -52,6 +52,14 @@ export default function App() {
   const [checkedActions, setCheckedActions] = useState({}); // { 'reelId-index': boolean }
   const [copiedText, setCopiedText] = useState(null); // tracking tool/action copy state
 
+  // Tabular view + clustering
+  const [clusters, setClusters] = useState([]);          // [{name, count}]
+  const [viewMode, setViewMode] = useState('cards');      // 'cards' | 'table'
+  const [clusterFilter, setClusterFilter] = useState('All');
+  const [toolFilter, setToolFilter] = useState('All');
+  const [sortOrder, setSortOrder] = useState('newest');   // 'newest' | 'oldest'
+  const [isRecomputing, setIsRecomputing] = useState(false);
+
   const steps = [
     { num: 1, label: "Server Check" },
     { num: 2, label: "Fetch Video" },
@@ -64,6 +72,7 @@ export default function App() {
   // Fetch reels from Supabase on mount
   useEffect(() => {
     fetchReels();
+    fetchClusters();
     checkBackendHealth();
   }, []);
 
@@ -80,10 +89,9 @@ export default function App() {
     }
   };
 
-  const fetchReels = async (search = '') => {
+  const fetchReels = async () => {
     try {
-      const urlParam = search ? `?search=${encodeURIComponent(search)}` : '';
-      const response = await fetch(`${API_BASE_URL}/reels${urlParam}`);
+      const response = await fetch(`${API_BASE_URL}/reels?limit=500`);
       if (response.ok) {
         const data = await response.json();
         setReels(data);
@@ -93,11 +101,34 @@ export default function App() {
     }
   };
 
-  const handleSearchChange = (e) => {
-    const q = e.target.value;
-    setSearchQuery(q);
-    fetchReels(q);
+  const fetchClusters = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/clusters`);
+      if (response.ok) setClusters(await response.json());
+    } catch (err) {
+      console.error("Error fetching clusters", err);
+    }
   };
+
+  const handleRecompute = async () => {
+    setIsRecomputing(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/clusters/recompute`, { method: 'POST' });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || 'Recompute failed.');
+      }
+      await fetchReels();
+      await fetchClusters();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsRecomputing(false);
+    }
+  };
+
+  const handleSearchChange = (e) => setSearchQuery(e.target.value);
 
   const handleUrlSubmit = async (e) => {
     e.preventDefault();
@@ -270,6 +301,28 @@ export default function App() {
       year: 'numeric'
     });
   };
+
+  const allTools = Array.from(
+    new Set(reels.flatMap(r => r.extracted_json?.tools_or_resources || []))
+  ).sort();
+
+  const filteredReels = reels
+    .filter(r => clusterFilter === 'All' || (r.cluster || 'Unclustered') === clusterFilter)
+    .filter(r => toolFilter === 'All' || (r.extracted_json?.tools_or_resources || []).includes(toolFilter))
+    .filter(r => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      const ej = r.extracted_json || {};
+      const hay = [
+        r.title, r.raw_transcript, r.post_caption, ej.core_topic, ej.key_takeaway,
+        ...(ej.tools_or_resources || []), ...(ej.action_items || [])
+      ].filter(Boolean).join(' ').toLowerCase();
+      return hay.includes(q);
+    })
+    .sort((a, b) => {
+      const da = new Date(a.created_at || 0), db = new Date(b.created_at || 0);
+      return sortOrder === 'newest' ? db - da : da - db;
+    });
 
   return (
     <div className="app-container">
@@ -478,14 +531,68 @@ export default function App() {
           </div>
         </div>
 
+        {reels.length > 0 && (
+          <div className="controls-bar">
+            <div className="view-toggle">
+              <button className={viewMode === 'cards' ? 'active' : ''} onClick={() => setViewMode('cards')}>Cards</button>
+              <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>Table</button>
+            </div>
+
+            <select value={clusterFilter} onChange={e => setClusterFilter(e.target.value)}>
+              <option value="All">All clusters</option>
+              {clusters.map(c => (
+                <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
+              ))}
+            </select>
+
+            <select value={toolFilter} onChange={e => setToolFilter(e.target.value)}>
+              <option value="All">All tools</option>
+              {allTools.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+
+            <select value={sortOrder} onChange={e => setSortOrder(e.target.value)}>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+            </select>
+
+            <button className="recompute-btn" onClick={handleRecompute} disabled={isRecomputing}>
+              {isRecomputing ? 'Clustering…' : 'Recompute clusters'}
+            </button>
+          </div>
+        )}
+
         {reels.length === 0 ? (
           <div className="glass empty-state">
             <Sparkles size={48} className="empty-state-icon" style={{ margin: '0 auto 1rem auto' }} />
             <p>No extractions found. Input a Reel URL above to kickstart the autonomous pipeline!</p>
           </div>
+        ) : viewMode === 'table' ? (
+          <table className="insights-table glass">
+            <thead>
+              <tr>
+                <th>Topic</th><th>Cluster</th><th>Key takeaway</th><th>Tools</th><th>Saved</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReels.map(reel => {
+                const ej = reel.extracted_json || {};
+                return (
+                  <tr key={reel.id} onClick={() => { setSelectedReel(reel); setIsTranscriptOpen(false); setIsCaptionOpen(false); }}>
+                    <td>{ej.core_topic || reel.title}</td>
+                    <td><span className="cluster-pill">{reel.cluster || 'Unclustered'}</span></td>
+                    <td>{ej.key_takeaway}</td>
+                    <td>{(ej.tools_or_resources || []).map((t, i) => (
+                      <span className="tool-chip" key={i}>{t}</span>
+                    ))}</td>
+                    <td>{formatDate(reel.created_at) || '—'}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         ) : (
           <div className="reels-grid">
-            {reels.map((reel) => {
+            {filteredReels.map((reel) => {
               const details = reel.extracted_json || {};
               return (
                 <article 

@@ -27,6 +27,27 @@ def test_health():
     assert response.json()["status"] == "ok"
     print("[OK] Health check passed!")
 
+def test_cluster_column_migration():
+    print("Testing cluster column migration (idempotent)...")
+    import main, sqlite3
+    # Run init twice — must not error and column must exist exactly once
+    main.init_local_db()
+    main.init_local_db()
+    conn = sqlite3.connect(main.DB_PATH)
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(saved_reels)").fetchall()]
+    conn.close()
+    assert cols.count("cluster") == 1, f"cluster column missing/duplicated: {cols}"
+    print("[OK] cluster column migration passed!")
+
+def test_cluster_assignments_model():
+    print("Testing ClusterAssignments validation...")
+    from main import ClusterAssignments
+    m = ClusterAssignments(assignments=[{"id": "a", "cluster": "AI Tools"},
+                                         {"id": "b", "cluster": "Fitness"}])
+    assert m.assignments[0].cluster == "AI Tools"
+    assert m.assignments[1].id == "b"
+    print("[OK] ClusterAssignments model passed!")
+
 def test_extract_text_mock():
     print("Testing POST /extract/text with mock data...")
     # Monkeypatch the extract_structured_json function in main to prevent external calls
@@ -71,9 +92,72 @@ def test_extract_text_mock():
         main.extract_structured_json = original_extract
         main.save_to_database = original_save
 
+def test_recompute_clusters_mock():
+    print("Testing POST /clusters/recompute (mocked)...")
+    import main, sqlite3, json, uuid
+    # Seed two reels directly
+    conn = sqlite3.connect(main.DB_PATH)
+    ids = [str(uuid.uuid4()), str(uuid.uuid4())]
+    payloads = [
+        {"core_topic": "AI email tools", "key_takeaway": "k", "action_items": [], "tools_or_resources": []},
+        {"core_topic": "Marathon training", "key_takeaway": "k", "action_items": [], "tools_or_resources": []},
+    ]
+    for rid, p in zip(ids, payloads):
+        conn.execute(
+            "INSERT INTO saved_reels (id, url, title, raw_transcript, post_caption, extracted_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (rid, None, "t", None, None, json.dumps(p)),
+        )
+    conn.commit(); conn.close()
+
+    original = main.cluster_topics_with_llm
+    # Assign by id so the two freshly-seeded reels get the expected clusters
+    # regardless of how many pre-existing rows the DB already holds.
+    main.cluster_topics_with_llm = lambda items: [
+        {"id": it["id"],
+         "cluster": "Productivity" if it["id"] == ids[0] else "Fitness" if it["id"] == ids[1] else "Other"}
+        for it in items
+    ]
+    try:
+        r = client.post("/clusters/recompute")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["assigned"] >= 2
+        conn = sqlite3.connect(main.DB_PATH)
+        got = dict(conn.execute("SELECT id, cluster FROM saved_reels WHERE id IN (?, ?)", ids).fetchall())
+        conn.close()
+        assert set(got.values()) >= {"Productivity", "Fitness"}
+        print("[OK] recompute clusters passed!")
+    finally:
+        main.cluster_topics_with_llm = original
+
+def test_list_clusters():
+    print("Testing GET /clusters...")
+    r = client.get("/clusters")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert isinstance(data, list)
+    if data:
+        assert "name" in data[0] and "count" in data[0]
+    print("[OK] list clusters passed!")
+
+def test_reels_include_cluster():
+    print("Testing GET /reels includes cluster field...")
+    r = client.get("/reels")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    if data:
+        assert "cluster" in data[0], f"cluster missing from reel row: {data[0].keys()}"
+    print("[OK] reels include cluster passed!")
+
 if __name__ == "__main__":
     print("--- Starting Transcriber Pipeline Test ---")
     test_health()
+    test_cluster_column_migration()
+    test_cluster_assignments_model()
     test_extract_text_mock()
+    test_recompute_clusters_mock()
+    test_list_clusters()
+    test_reels_include_cluster()
     print("--- All tests completed successfully! ---")
     sys.exit(0)

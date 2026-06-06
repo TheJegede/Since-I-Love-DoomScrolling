@@ -1,7 +1,7 @@
 # Design: Tabular Insights View with Emergent Topic Clustering
 
 Date: 2026-06-06
-Status: Approved (Approach A) — pending spec review
+Status: Implemented (2026-06-06)
 Component: Transcriber (backend `backend/main.py`, frontend `frontend/src/App.jsx`)
 
 ## 1. Goal

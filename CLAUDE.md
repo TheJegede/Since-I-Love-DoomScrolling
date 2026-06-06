@@ -19,7 +19,9 @@ The core flow is `download → transcribe → extract → persist`, exposed via 
 - `POST /extract/url` — full pipeline. `download_and_extract_audio` (yt-dlp + ffmpeg → MP3 in tmp) → `transcribe_audio` (Groq Whisper) → `extract_structured_json` (Groq Llama) → save. URL results are **cached**: a repeat URL returns the existing DB row without re-running inference.
 - `POST /extract/file` — skips download; transcribes an uploaded audio file.
 - `POST /extract/text` — skips download + transcription; runs LLM extraction on pasted transcript/caption directly.
-- `GET /reels` — lists saved rows, with optional `search` (SQL `LIKE` across title/transcript/caption/JSON).
+- `GET /reels` — lists saved rows (rows include `cluster`), with optional `search` (SQL `LIKE` across title/transcript/caption/JSON).
+- `POST /clusters/recompute` — one Llama call regroups all reels into emergent topic clusters (`cluster_topics_with_llm`), persists `cluster` per row, returns `{clusters:[{name,count}], assigned}`. Failure rolls back, leaving prior clusters intact.
+- `GET /clusters` — `[{name, count}]` grouped by cluster (NULL → "Unclustered"). Drives the frontend filter dropdown.
 - `GET /health` — used by the frontend to detect a cold/sleeping backend.
 
 Key behaviors to preserve when editing:
@@ -30,10 +32,10 @@ Key behaviors to preserve when editing:
 - **Temp files** are always cleaned up in a `finally` block.
 
 ### Storage
-Embedded **SQLite** at `backend/local_storage.db` (`saved_reels` table), created on startup by `init_local_db`. No external DB, despite the implementation-plan doc mentioning Supabase/Postgres — the actual code uses SQLite. The doc is aspirational; the code is the source of truth.
+Embedded **SQLite** at `backend/local_storage.db` (`saved_reels` table), created on startup by `init_local_db`. The table has a nullable `cluster` column added via an idempotent PRAGMA-guarded migration in `init_local_db`. No external DB, despite the implementation-plan doc mentioning Supabase/Postgres — the actual code uses SQLite. The doc is aspirational; the code is the source of truth.
 
 ### Frontend (`frontend/src/App.jsx`)
-Single-component SPA. API base resolves via `import.meta.env.VITE_API_URL`, falling back to `http://localhost:8000` on localhost or same-origin in production (`App.jsx:25`). Polls `/health` to show a backend warm-up state. Mirrors the three backend ingestion modes (URL / file upload / text paste) plus a searchable card grid.
+Single-component SPA. API base resolves via `import.meta.env.VITE_API_URL`, falling back to `http://localhost:8000` on localhost or same-origin in production (`App.jsx:25`). Polls `/health` to show a backend warm-up state. Mirrors the three backend ingestion modes (URL / file upload / text paste) plus a results view that toggles between a card grid and a table (`InsightsTable`). Reels load once (`/reels?limit=500`); search, cluster, tool, and date filters all run **in-memory** over `filteredReels` (the server `LIKE` search is no longer used by the UI). A "Recompute clusters" button calls `/clusters/recompute`.
 
 ## Commands
 
