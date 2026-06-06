@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
+import './App.css';
+import {
   Clapperboard,
   Search,
   FileAudio, 

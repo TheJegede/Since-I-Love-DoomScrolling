@@ -1,0 +1,62 @@
+{
+  "$schema": "https://design-tokens.github.io/community-group/format/",
+  "color": {
+    "bg": {
+      "dark":   { "$value": "#0E0E13", "$type": "color", "$description": "hsl(240 20% 6%) app canvas", "$extensions": { "confidence": "high" } },
+      "card":   { "$value": "#13131B", "$type": "color", "$description": "hsl(240 21% 9%) solid card/node fill" },
+      "input":  { "$value": "rgba(20,20,30,0.6)", "$type": "color", "$description": "input field fill" }
+    },
+    "surface": {
+      "glass": { "$value": "rgba(18,18,28,0.7)", "$type": "color", "$description": "frosted card fill (.glass)" }
+    },
+    "accent": {
+      "primary":   { "$value": "#8B5CF6", "$type": "color", "$description": "hsl(263 85% 63%) violet — CTA, links, glow", "$extensions": { "confidence": "high" } },
+      "secondary": { "$value": "#EC4899", "$type": "color", "$description": "hsl(325 83% 58%) pink — gradient end" },
+      "success":   { "$value": "#21C45D", "$type": "color", "$description": "hsl(142 71% 45%)" },
+      "warning":   { "$value": "#F59E0B", "$type": "color", "$description": "hsl(38 92% 50%)" }
+    },
+    "text": {
+      "primary":   { "$value": "#FAFAFA", "$type": "color" },
+      "secondary": { "$value": "#BCBCC2", "$type": "color" },
+      "muted":     { "$value": "#78788A", "$type": "color" }
+    },
+    "border": {
+      "default": { "$value": "rgba(255,255,255,0.08)", "$type": "color" },
+      "hover":   { "$value": "rgba(139,92,246,0.3)", "$type": "color" }
+    }
+  },
+  "gradient": {
+    "brand": { "$value": "linear-gradient(135deg, #8B5CF6 0%, #EC4899 100%)", "$type": "gradient", "$description": "The ONE brand thing — violet to pink" }
+  },
+  "typography": {
+    "fontFamily": { "$value": "Plus Jakarta Sans, system-ui, sans-serif", "$type": "fontFamily" },
+    "display":      { "$type": "typography", "$value": { "fontFamily": "Plus Jakarta Sans", "fontSize": "36px", "fontWeight": 800, "letterSpacing": "-0.5px" } },
+    "modal-title":  { "$type": "typography", "$value": { "fontFamily": "Plus Jakarta Sans", "fontSize": "28px", "fontWeight": 800, "lineHeight": "1.35" } },
+    "section-title":{ "$type": "typography", "$value": { "fontFamily": "Plus Jakarta Sans", "fontSize": "22px", "fontWeight": 700 } },
+    "card-title":   { "$type": "typography", "$value": { "fontFamily": "Plus Jakarta Sans", "fontSize": "18px", "fontWeight": 700, "lineHeight": "1.4" } },
+    "body":         { "$type": "typography", "$value": { "fontFamily": "Plus Jakarta Sans", "fontSize": "16px", "fontWeight": 400, "lineHeight": "1.5" } },
+    "caption":      { "$type": "typography", "$value": { "fontFamily": "Plus Jakarta Sans", "fontSize": "12px", "fontWeight": 500 } }
+  },
+  "spacing": {
+    "base": { "$value": "4px", "$type": "dimension" },
+    "1": { "$value": "8px", "$type": "dimension" },
+    "2": { "$value": "12px", "$type": "dimension" },
+    "3": { "$value": "16px", "$type": "dimension" },
+    "4": { "$value": "24px", "$type": "dimension" },
+    "5": { "$value": "28px", "$type": "dimension" },
+    "6": { "$value": "32px", "$type": "dimension" },
+    "7": { "$value": "40px", "$type": "dimension" }
+  },
+  "radius": {
+    "sm":   { "$value": "8px", "$type": "dimension" },
+    "md":   { "$value": "12px", "$type": "dimension" },
+    "lg":   { "$value": "16px", "$type": "dimension" },
+    "pill": { "$value": "20px", "$type": "dimension" },
+    "full": { "$value": "9999px", "$type": "dimension" }
+  },
+  "shadow": {
+    "glow":       { "$value": "0 0 20px rgba(139,92,246,0.25)", "$type": "shadow" },
+    "card-hover": { "$value": "0 8px 30px rgba(0,0,0,0.4), 0 0 15px rgba(139,92,246,0.05)", "$type": "shadow" },
+    "modal":      { "$value": "0 20px 50px rgba(0,0,0,0.6)", "$type": "shadow" }
+  }
+}
