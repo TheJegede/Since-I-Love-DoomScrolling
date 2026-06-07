@@ -55,3 +55,12 @@ local_storage.db has junk rows from repeated test seeding (Marathon/AI email) â€
 - Cleaned up frontend ESLint issues (unused imports and `useEffect` hook order/hoisting issues in `App.jsx`) and verified that `npm run lint` and `npm run build` now pass cleanly.
 - Staged and committed changes (`frontend/.gitignore`, `frontend/src/App.jsx`) on branch `feat/supabase-hybrid`.
 
+### 2026-06-06 â€” Bulk Import of Saved Reels (Task complete on main)
+- Created `backend/saved_parser.py` containing the `parse_saved_posts` parser shared by the server and CLI.
+- Refactored `backend/batch_import.py` to use the shared parser.
+- Modified `backend/main.py` adding `POST /extract/batch`, `GET /extract/batch/status` and `POST /reels/status` to handle stateless batch imports under the Supabase hybrid queue worker model.
+- Added tests to `backend/verify_pipeline.py` verifying batch endpoints and parsing logic. All 20 tests pass.
+- Modified `frontend/src/App.jsx` adding the `'bulk'` mode tab, file upload zone, status polling, and a dynamic progress bar.
+- Cleaned up the local git workspace (merged `feat/supabase-hybrid` into `main`, deleted local feature branch, and pushed to GitHub `origin/main`).
+- Committed the Bulk Import feature to `main`, pushed to GitHub `origin/main`, and deployed the backend changes to Hugging Face Spaces (`hf/main` subtree split).
+- Local backend health endpoint verified successfully.
