@@ -32,6 +32,8 @@ if not GROQ_API_KEY:
 
 # Initialize data layer
 import db
+from saved_parser import parse_saved_posts
+
 
 def init_local_db():
     """Schema is managed in Supabase (see docs). This only verifies config presence."""
@@ -687,3 +689,181 @@ async def extract_text(payload: dict):
     )
 
     return db_record
+
+
+BATCH_JOB = {
+    "status": "idle",   # idle | running | done | error
+    "total": 0,
+    "done": 0,
+    "ok": 0,
+    "failed": 0,
+    "current": "",
+    "errors": [],
+    "urls": [],
+    "started_at": None,
+    "finished_at": None,
+}
+
+
+async def update_batch_job_status():
+    """Query Supabase to aggregate current progress for the tracked URLs."""
+    if not BATCH_JOB["urls"]:
+        BATCH_JOB["status"] = "idle"
+        return
+        
+    client = db.get_client()
+    urls = BATCH_JOB["urls"]
+    
+    # Fetch all statuses in chunks of 100 to avoid query limit bounds
+    db_rows = []
+    for i in range(0, len(urls), 100):
+        chunk = urls[i:i+100]
+        try:
+            res = client.table(db.TABLE).select("url", "status", "error").in_("url", chunk).execute()
+            db_rows.extend(res.data or [])
+        except Exception as e:
+            logger.error(f"Error fetching batch status chunk: {e}")
+            
+    status_map = {row["url"]: row for row in db_rows}
+    
+    ok = 0
+    failed = 0
+    processing = 0
+    current_url = ""
+    errors = []
+    
+    for url in urls:
+        row = status_map.get(url)
+        if not row:
+            # Not yet inserted or missing? Treat as pending
+            processing += 1
+        else:
+            status = row.get("status") or "done"
+            if status == "done":
+                ok += 1
+            elif status == "failed":
+                failed += 1
+                errors.append({"url": url, "detail": row.get("error") or "Unknown error"})
+            else:
+                processing += 1
+                if status == "processing":
+                    current_url = url
+                
+    done = ok + failed
+    BATCH_JOB.update({
+        "done": done,
+        "ok": ok,
+        "failed": failed,
+        "current": current_url,
+        "errors": errors[-50:],  # cap error log
+    })
+    
+    if processing == 0:
+        BATCH_JOB["status"] = "done"
+        from datetime import datetime, timezone
+        BATCH_JOB["finished_at"] = datetime.now(timezone.utc).isoformat()
+
+
+@app.post("/extract/batch")
+async def extract_batch(file: UploadFile = File(...)):
+    """Accept an uploaded saved_posts.json and enqueue reels in Supabase."""
+    if BATCH_JOB["status"] == "running":
+        await update_batch_job_status()
+        if BATCH_JOB["status"] == "running":
+            raise HTTPException(status_code=409, detail="A batch import is already running.")
+
+    try:
+        raw = await file.read()
+        data = json.loads(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Could not parse uploaded JSON.")
+        
+    reels = parse_saved_posts(data)
+    if not reels:
+        raise HTTPException(status_code=400, detail="No reel URLs found in the uploaded file.")
+        
+    # Query Supabase to find which URLs already exist
+    client = db.get_client()
+    urls = [r["url"] for r in reels]
+    
+    # Check existing in chunks of 100
+    existing_urls = set()
+    for i in range(0, len(urls), 100):
+        chunk = urls[i:i+100]
+        res = client.table(db.TABLE).select("url").in_("url", chunk).execute()
+        for row in (res.data or []):
+            existing_urls.add(row["url"])
+            
+    new_reels = [r for r in reels if r["url"] not in existing_urls]
+    
+    enqueued_count = 0
+    if new_reels:
+        import uuid
+        from datetime import datetime, timezone
+        rows_to_insert = [
+            {
+                "id": str(uuid.uuid4()),
+                "url": r["url"],
+                "title": r["title"] or f"Reel ({r['url'].split('/reel/')[-1].replace('/', '')})",
+                "raw_transcript": "",
+                "post_caption": r["caption"],
+                "extracted_json": {},
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "status": "pending",
+                "source": "batch",
+            }
+            for r in new_reels
+        ]
+        
+        # Insert in chunks of 50
+        for i in range(0, len(rows_to_insert), 50):
+            client.table(db.TABLE).insert(rows_to_insert[i:i+50]).execute()
+        enqueued_count = len(rows_to_insert)
+
+    # Initialize batch tracking state
+    from datetime import datetime, timezone
+    BATCH_JOB.update({
+        "status": "running" if enqueued_count > 0 else "done",
+        "total": len(urls),
+        "urls": urls,
+        "done": len(existing_urls),
+        "ok": len(existing_urls),
+        "failed": 0,
+        "current": "",
+        "errors": [],
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": datetime.now(timezone.utc).isoformat() if enqueued_count == 0 else None,
+    })
+    
+    return {
+        "started": enqueued_count > 0,
+        "total": len(urls),
+        "enqueued": enqueued_count,
+        "existing": len(existing_urls),
+    }
+
+
+@app.get("/extract/batch/status")
+async def extract_batch_status():
+    """Poll endpoint to check progress."""
+    if BATCH_JOB["status"] == "running":
+        await update_batch_job_status()
+    return BATCH_JOB
+
+
+@app.post("/reels/status")
+async def get_reels_status(payload: dict):
+    """Stateless status check for a list of URLs."""
+    urls = payload.get("urls", [])
+    if not urls:
+        return []
+        
+    client = db.get_client()
+    db_rows = []
+    for i in range(0, len(urls), 100):
+        chunk = urls[i:i+100]
+        res = client.table(db.TABLE).select("url", "status", "error").in_("url", chunk).execute()
+        db_rows.extend(res.data or [])
+        
+    return db_rows
+

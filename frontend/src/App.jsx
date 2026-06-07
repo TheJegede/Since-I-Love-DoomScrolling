@@ -52,6 +52,12 @@ export default function App() {
   const [fileCaption, setFileCaption] = useState('');
   const fileInputRef = useRef(null);
 
+  // Bulk import (saved_posts.json)
+  const batchInputRef = useRef(null);
+  const [batchFile, setBatchFile] = useState(null);
+  const [batchJob, setBatchJob] = useState(null);
+  const [isBatchRunning, setIsBatchRunning] = useState(false);
+
   // Text inputs states
   const [textTitle, setTextTitle] = useState('');
   const [textCaption, setTextCaption] = useState('');
@@ -325,6 +331,63 @@ export default function App() {
     }
   };
 
+  const handleBatchSelect = (e) => {
+    const selected = e.target.files[0];
+    if (selected) setBatchFile(selected);
+  };
+
+  const pollBatchStatus = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/extract/batch/status`);
+      if (!res.ok) return;
+      const job = await res.json();
+      setBatchJob(job);
+      if (job.status !== 'running') {
+        setIsBatchRunning(false);
+        fetchReels();
+        fetchClusters();
+      }
+    } catch (err) {
+      console.error("Error polling batch status", err);
+    }
+  };
+
+  const handleBatchSubmit = async (e) => {
+    e.preventDefault();
+    if (!batchFile) return;
+    setError(null);
+    setIsLoading(true);
+    const formData = new FormData();
+    formData.append('file', batchFile);
+    try {
+      const res = await fetch(`${API_BASE_URL}/extract/batch`, { method: 'POST', body: formData });
+      if (res.status === 409) {
+        // a job is already running — attach to it
+        setIsBatchRunning(true);
+        setIsLoading(false);
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Failed to start batch import.');
+      }
+      setIsBatchRunning(true);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isBatchRunning) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    pollBatchStatus();
+    const id = setInterval(pollBatchStatus, 3000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isBatchRunning]);
+
   const handleCopy = (text, key) => {
     navigator.clipboard.writeText(text);
     setCopiedText(key);
@@ -428,6 +491,13 @@ export default function App() {
             style={{ borderBottom: mode === 'text' ? '2px solid var(--accent-primary)' : 'none', paddingBottom: '0.5rem', color: mode === 'text' ? 'var(--text-primary)' : 'var(--text-muted)' }}
           >
             <FileText size={16} /> Transcript Text
+          </button>
+          <button 
+            className={`alt-input-btn ${mode === 'bulk' ? 'active' : ''}`}
+            onClick={() => setMode('bulk')}
+            style={{ borderBottom: mode === 'bulk' ? '2px solid var(--accent-primary)' : 'none', paddingBottom: '0.5rem', color: mode === 'bulk' ? 'var(--text-primary)' : 'var(--text-muted)' }}
+          >
+            <UploadCloud size={16} /> Bulk Import
           </button>
         </div>
 
@@ -533,6 +603,58 @@ export default function App() {
                 {isLoading ? "Running Groq Llama..." : "Extract Insights"}
               </button>
             </div>
+          </form>
+        )}
+
+        {mode === 'bulk' && (
+          <form onSubmit={handleBatchSubmit}>
+            <div 
+              className="upload-zone"
+              onClick={() => batchInputRef.current.click()}
+            >
+              <input 
+                type="file" 
+                ref={batchInputRef} 
+                onChange={handleBatchSelect} 
+                accept="application/json,.json" 
+                style={{ display: 'none' }} 
+              />
+              <UploadCloud size={40} className="empty-state-icon" style={{ margin: '0 auto 1rem auto' }} />
+              {batchFile ? (
+                <div>
+                  <p style={{ fontWeight: '600', color: 'var(--accent-primary)' }}>{batchFile.name}</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{(batchFile.size / 1024).toFixed(0)} KB</p>
+                </div>
+              ) : (
+                <div>
+                  <p style={{ fontWeight: '600' }}>Upload your Instagram saved_posts.json</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>From "Download Your Information" → Saved (JSON). Reels only; photos skipped.</p>
+                </div>
+              )}
+            </div>
+
+            <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start', marginTop: '1rem' }} disabled={isLoading || isBatchRunning || !batchFile}>
+              {isBatchRunning ? "Importing..." : "Start Bulk Import"}
+            </button>
+
+            {batchJob && (
+              <div style={{ marginTop: '1.5rem' }}>
+                <div style={{ height: '8px', background: 'var(--bg-input)', borderRadius: '4px', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${batchJob.total ? Math.round((batchJob.done / batchJob.total) * 100) : 0}%`,
+                    background: 'var(--accent-primary)',
+                    transition: 'width 0.4s ease'
+                  }} />
+                </div>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                  {batchJob.status === 'running' ? 'Running' : batchJob.status === 'done' ? 'Done' : batchJob.status} — {batchJob.done}/{batchJob.total} · ok {batchJob.ok} · failed {batchJob.failed}
+                </p>
+                {batchJob.current && batchJob.status === 'running' && (
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>Now: {batchJob.current}</p>
+                )}
+              </div>
+            )}
           </form>
         )}
 

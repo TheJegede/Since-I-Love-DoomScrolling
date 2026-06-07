@@ -353,6 +353,164 @@ def test_reels_include_cluster():
     finally:
         main.db.list_reels = orig
 
+
+def test_parse_saved_posts():
+    print("Testing parse_saved_posts filters reels...")
+    from saved_parser import parse_saved_posts
+    sample = [
+        {"label_values": [
+            {"label": "URL", "value": "https://www.instagram.com/reel/AAA/"},
+            {"label": "Caption", "value": "hello"},
+            {"label": "Title", "value": "T1"}]},
+        {"label_values": [
+            {"label": "URL", "value": "https://www.instagram.com/p/BBB/"},
+            {"label": "Caption", "value": "photo"}]},
+    ]
+    out = parse_saved_posts(sample)
+    assert len(out) == 1, out
+    assert out[0]["url"].endswith("/reel/AAA/")
+    assert out[0]["caption"] == "hello"
+    assert out[0]["title"] == "T1"
+    print("[OK] parse_saved_posts passed!")
+
+
+def test_batch_status_initial():
+    print("Testing GET /extract/batch/status shape...")
+    r = client.get("/extract/batch/status")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    for key in ("status", "total", "done", "ok", "failed", "current", "errors"):
+        assert key in body, f"missing {key} in {body}"
+    print("[OK] batch status shape passed!")
+
+
+def test_batch_guard_409():
+    print("Testing POST /extract/batch returns 409 while running...")
+    import main, io
+    prev = dict(main.BATCH_JOB)
+    main.BATCH_JOB["status"] = "running"
+    async def fake_update():
+        pass
+    orig_update = main.update_batch_job_status
+    main.update_batch_job_status = fake_update
+    try:
+        files = {"file": ("saved_posts.json", io.BytesIO(b"[]"), "application/json")}
+        r = client.post("/extract/batch", files=files)
+        assert r.status_code == 409, r.text
+        print("[OK] batch 409 guard passed!")
+    finally:
+        main.BATCH_JOB.update(prev)
+        main.update_batch_job_status = orig_update
+
+
+
+def test_extract_batch_supabase():
+    print("Testing POST /extract/batch enqueuing (db mocked)...")
+    import main, io
+    # Mock supabase client and database calls
+    class FakeTable:
+        def __init__(self, data=None):
+            self.data = data or []
+            self.inserted = []
+
+        def select(self, *args, **kwargs):
+            return self
+
+        def in_(self, col, vals):
+            # simulate existing URLs: say BBB already exists, AAA is new
+            matching = [d for d in self.data if d.get(col) in vals]
+            return FakeTable(matching)
+
+        def insert(self, rows):
+            if isinstance(rows, list):
+                self.inserted.extend(rows)
+            else:
+                self.inserted.append(rows)
+            return self
+
+        def execute(self):
+            class Res:
+                def __init__(self, data):
+                    self.data = data
+            return Res(self.data)
+
+    fake_db = [{"url": "https://www.instagram.com/reel/BBB/"}]
+    fake_table = FakeTable(fake_db)
+    
+    orig_client = main.db.get_client
+    main.db.get_client = lambda: type('FakeClient', (), {'table': lambda self, name: fake_table})()
+    
+    sample_json = (
+        '['
+        '  {"label_values": [{"label": "URL", "value": "https://www.instagram.com/reel/AAA/"}]},'
+        '  {"label_values": [{"label": "URL", "value": "https://www.instagram.com/reel/BBB/"}]}'
+        ']'
+    )
+    
+    try:
+        files = {"file": ("saved_posts.json", io.BytesIO(sample_json.encode('utf-8')), "application/json")}
+        r = client.post("/extract/batch", files=files)
+        assert r.status_code == 200, r.text
+        res_json = r.json()
+        assert res_json["total"] == 2
+        assert res_json["enqueued"] == 1
+        assert res_json["existing"] == 1
+        
+        # AAA should have been inserted
+        assert len(fake_table.inserted) == 1
+        assert fake_table.inserted[0]["url"] == "https://www.instagram.com/reel/AAA/"
+        assert fake_table.inserted[0]["status"] == "pending"
+        assert fake_table.inserted[0]["source"] == "batch"
+        
+        # Poll status
+        # status should show running, total=2, done=1, ok=1
+        r_status = client.get("/extract/batch/status")
+        assert r_status.status_code == 200
+        status_data = r_status.json()
+        assert status_data["status"] == "running"
+        assert status_data["total"] == 2
+        assert status_data["done"] == 1
+        
+        # Simulate processing AAA -> done
+        fake_table.data.append({"url": "https://www.instagram.com/reel/AAA/", "status": "done"})
+        r_status2 = client.get("/extract/batch/status")
+        assert r_status2.json()["status"] == "done"
+        assert r_status2.json()["done"] == 2
+        assert r_status2.json()["ok"] == 2
+        
+        print("[OK] extract batch supabase mocked test passed!")
+    finally:
+        main.db.get_client = orig_client
+        main.BATCH_JOB["status"] = "idle"
+        main.BATCH_JOB["urls"] = []
+
+
+def test_reels_status_endpoint():
+    print("Testing POST /reels/status...")
+    import main
+    class FakeTable:
+        def select(self, *args):
+            return self
+        def in_(self, col, vals):
+            return self
+        def execute(self):
+            class Res:
+                data = [{"url": "https://www.instagram.com/reel/AAA/", "status": "done"}]
+            return Res()
+            
+    orig_client = main.db.get_client
+    main.db.get_client = lambda: type('FakeClient', (), {'table': lambda self, name: FakeTable()})()
+    try:
+        r = client.post("/reels/status", json={"urls": ["https://www.instagram.com/reel/AAA/"]})
+        assert r.status_code == 200, r.text
+        assert len(r.json()) == 1
+        assert r.json()[0]["url"] == "https://www.instagram.com/reel/AAA/"
+        assert r.json()[0]["status"] == "done"
+        print("[OK] reels status endpoint passed!")
+    finally:
+        main.db.get_client = orig_client
+
+
 if __name__ == "__main__":
     print("--- Starting Transcriber Pipeline Test ---")
     test_health()
@@ -370,5 +528,12 @@ if __name__ == "__main__":
     test_delete_reel()
     test_list_clusters()
     test_reels_include_cluster()
+    test_parse_saved_posts()
+    test_batch_status_initial()
+    test_batch_guard_409()
+    test_extract_batch_supabase()
+    test_reels_status_endpoint()
     print("--- All tests completed successfully! ---")
     sys.exit(0)
+
+

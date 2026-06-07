@@ -25,24 +25,14 @@ import requests
 PROGRESS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "batch_progress.json")
 
 
+from saved_parser import parse_saved_posts
+
+
 def parse_saved(json_path):
     """Return list of {url, caption, title} for every /reel/ URL in the export."""
     with open(json_path, encoding="utf-8") as f:
         data = json.load(f)
-    items = []
-    for entry in data:
-        url = caption = title = ""
-        for lv in entry.get("label_values", []):
-            label = lv.get("label")
-            if label == "URL":
-                url = lv.get("value", "")
-            elif label == "Caption":
-                caption = lv.get("value", "")
-            elif label == "Title":
-                title = lv.get("value", "")
-        if "/reel/" in url:
-            items.append({"url": url, "caption": caption, "title": title})
-    return items
+    return parse_saved_posts(data)
 
 
 def load_progress():
