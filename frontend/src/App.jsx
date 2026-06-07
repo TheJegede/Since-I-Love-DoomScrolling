@@ -738,6 +738,7 @@ export default function App() {
             <p>No extractions found. Input a Reel URL above to kickstart the autonomous pipeline!</p>
           </div>
         ) : viewMode === 'table' ? (
+          <div className="table-scroll">
           <table className="insights-table glass">
             <thead>
               <tr>
@@ -770,6 +771,7 @@ export default function App() {
               })}
             </tbody>
           </table>
+          </div>
         ) : (
           <div className="reels-grid">
             {filteredReels.map((reel) => {

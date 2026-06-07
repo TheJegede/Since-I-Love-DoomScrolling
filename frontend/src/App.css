@@ -7,6 +7,30 @@
   align-items: center;
   flex-wrap: wrap;
   margin: 0 0 1.75rem;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: var(--bg-dark);
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .controls-bar { gap: 0.6rem; }
+  .controls-bar select,
+  .recompute-btn,
+  .view-toggle { width: 100%; }
+  .view-toggle button { flex: 1; }
+  .recompute-btn { margin-left: 0; justify-content: center; }
+}
+
+@media (pointer: coarse) {
+  .view-toggle button,
+  .controls-bar select,
+  .btn-primary,
+  .recompute-btn { min-height: 44px; }
+  .alt-input-btn { min-height: 40px; }
+  .delete-btn { padding: 0.5rem; }
 }
 
 /* Themed native selects (dark fill, hairline border, custom chevron) */
@@ -84,9 +108,22 @@
 }
 .recompute-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* Horizontal-scroll wrapper so the 6-col table never gets clipped on mobile */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-lg);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+          mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+@media (min-width: 760px) {
+  .table-scroll { -webkit-mask-image: none; mask-image: none; }
+}
+
 /* Insights table (lives inside a .glass wrapper) */
 .insights-table {
   width: 100%;
+  min-width: 640px;
   border-collapse: separate;
   border-spacing: 0;
   overflow: hidden;
