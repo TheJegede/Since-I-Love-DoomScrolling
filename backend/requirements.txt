@@ -7,3 +7,5 @@ python-multipart==0.0.9
 python-dotenv==1.0.1
 supabase>=2.31.0
 websockets>=13,<16
+httpx<0.28.0
+
