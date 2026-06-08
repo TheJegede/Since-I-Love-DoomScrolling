@@ -23,6 +23,20 @@ if os.path.exists(parent_env_path):
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
+# Auto-inject ffmpeg from WinGet packages if not found in PATH (Windows local dev helper)
+import shutil
+if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
+    localappdata = os.environ.get("LOCALAPPDATA")
+    if localappdata:
+        winget_packages_dir = os.path.join(localappdata, "Microsoft", "WinGet", "Packages")
+        if os.path.exists(winget_packages_dir):
+            import glob
+            ffmpeg_paths = glob.glob(os.path.join(winget_packages_dir, "**", "ffmpeg.exe"), recursive=True)
+            if ffmpeg_paths:
+                ffmpeg_bin_dir = os.path.dirname(ffmpeg_paths[0])
+                os.environ["PATH"] = ffmpeg_bin_dir + os.pathsep + os.environ["PATH"]
+                logger.info(f"Automatically added ffmpeg to PATH: {ffmpeg_bin_dir}")
+
 # Initialize configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
