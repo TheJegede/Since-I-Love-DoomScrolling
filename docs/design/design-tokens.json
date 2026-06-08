@@ -2,31 +2,31 @@
   "$schema": "https://design-tokens.github.io/community-group/format/",
   "color": {
     "bg": {
-      "dark":   { "$value": "#0E0E13", "$type": "color", "$description": "hsl(240 20% 6%) app canvas", "$extensions": { "confidence": "high" } },
-      "card":   { "$value": "#13131B", "$type": "color", "$description": "hsl(240 21% 9%) solid card/node fill" },
-      "input":  { "$value": "rgba(20,20,30,0.6)", "$type": "color", "$description": "input field fill" }
+      "dark":   { "$value": "#09090B", "$type": "color", "$description": "hsl(240 10% 3.9%) app canvas", "$extensions": { "confidence": "high" } },
+      "card":   { "$value": "#0F0F12", "$type": "color", "$description": "hsl(240 10% 5.9%) solid card/node fill" },
+      "input":  { "$value": "#18181B", "$type": "color", "$description": "hsl(240 10% 8.9%) input background" }
     },
     "surface": {
-      "glass": { "$value": "rgba(18,18,28,0.7)", "$type": "color", "$description": "frosted card fill (.glass)" }
+      "glass": { "$value": "#0F0F12", "$type": "color", "$description": "flat card fill (.glass)" }
     },
     "accent": {
-      "primary":   { "$value": "#8B66E1", "$type": "color", "$description": "hsl(258 67% 64%) desaturated violet — CTA, active, focus (solid only)", "$extensions": { "confidence": "high" } },
-      "secondary": { "$value": "#DA62AE", "$type": "color", "$description": "hsl(322 62% 62%) pink — used ONLY in the logo gradient" },
-      "success":   { "$value": "#21C45D", "$type": "color", "$description": "hsl(142 71% 45%)" },
-      "warning":   { "$value": "#F59E0B", "$type": "color", "$description": "hsl(38 92% 50%)" }
+      "primary":   { "$value": "#FAFAFA", "$type": "color", "$description": "hsl(0 0% 98%) off-white — CTA, active, focus", "$extensions": { "confidence": "high" } },
+      "secondary": { "$value": "#E4E4E7", "$type": "color", "$description": "hsl(240 5% 84.1%) zinc-200 — hover states" },
+      "success":   { "$value": "#10B981", "$type": "color", "$description": "hsl(142 71% 45%) completes" },
+      "warning":   { "$value": "#F59E0B", "$type": "color", "$description": "hsl(38 92% 50%) warnings" }
     },
     "text": {
       "primary":   { "$value": "#FAFAFA", "$type": "color" },
-      "secondary": { "$value": "#BCBCC2", "$type": "color" },
-      "muted":     { "$value": "#78788A", "$type": "color" }
+      "secondary": { "$value": "#A1A1AA", "$type": "color" },
+      "muted":     { "$value": "#71717A", "$type": "color" }
     },
     "border": {
-      "default": { "$value": "rgba(255,255,255,0.1)", "$type": "color" },
-      "hover":   { "$value": "rgba(124,99,222,0.35)", "$type": "color" }
+      "default": { "$value": "#27272A", "$type": "color" },
+      "hover":   { "$value": "#3F3F46", "$type": "color" }
     }
   },
   "gradient": {
-    "brand": { "$value": "linear-gradient(135deg, #8B66E1 0%, #DA62AE 100%)", "$type": "gradient", "$description": "The ONE brand thing — logo wordmark only; the single gradient in the system" }
+    "brand": { "$value": "linear-gradient(135deg, #ffffff 40%, #a1a1aa 100%)", "$type": "gradient", "$description": "logo white-to-zinc gradient" }
   },
   "typography": {
     "fontFamily": { "$value": "Plus Jakarta Sans, system-ui, sans-serif", "$type": "fontFamily" },
@@ -48,15 +48,15 @@
     "7": { "$value": "40px", "$type": "dimension" }
   },
   "radius": {
-    "sm":   { "$value": "8px", "$type": "dimension" },
-    "md":   { "$value": "12px", "$type": "dimension" },
-    "lg":   { "$value": "16px", "$type": "dimension" },
+    "sm":   { "$value": "4px", "$type": "dimension" },
+    "md":   { "$value": "6px", "$type": "dimension" },
+    "lg":   { "$value": "8px", "$type": "dimension" },
     "pill": { "$value": "20px", "$type": "dimension" },
     "full": { "$value": "9999px", "$type": "dimension" }
   },
   "shadow": {
     "surface-highlight": { "$value": "inset 0 1px 0 rgba(255,255,255,0.03)", "$type": "shadow", "$description": "crafted top edge on flat surfaces" },
-    "focus-ring":        { "$value": "0 0 0 2px rgba(124,99,222,0.25)", "$type": "shadow", "$description": "crisp violet focus ring (no blur/glow)" },
+    "focus-ring":        { "$value": "0 0 0 2px rgba(255,255,255,0.03)", "$type": "shadow", "$description": "focus ring" },
     "card-hover":        { "$value": "inset 0 1px 0 rgba(255,255,255,0.04), 0 6px 22px rgba(0,0,0,0.35)", "$type": "shadow" },
     "modal":             { "$value": "0 20px 50px rgba(0,0,0,0.6)", "$type": "shadow" }
   }

@@ -2,28 +2,27 @@
 version: anydesign-1
 name: Transcriber — Reels Insight Extractor (frontend)
 source: frontend/src/index.css + frontend/src/App.jsx + frontend/src/App.css (running at http://localhost:5173)
-captured_at: 2026-06-06
+captured_at: 2026-06-08
 description: |
-  A restrained dark dashboard for an AI tool that turns Instagram Reels into structured
-  insights. Near-black blue-tinted canvas, flat solid surfaces with crisp hairline borders
-  and a faint top-edge highlight, and a single desaturated violet accent used only where it
-  means something (primary actions, active/focus states). Exactly ONE gradient survives — the
-  violet→pink logo wordmark. No motion, no glow. Typeface is Plus Jakarta Sans (300–800).
-  The voice is calm and deliberate, in the Linear/Vercel line — intention over decoration.
+  A premium dark monochrome dashboard for an AI tool that turns Instagram Reels into structured
+  insights. Near-black zinc-950 canvas with a subtle geometric background grid, flat solid surfaces with
+  crisp hairline borders, and a single off-white accent (primary actions, active/focus states).
+  Logo text transitions in a sleek white-to-zinc gradient. Typeface is Plus Jakarta Sans (300–800).
+  Intention over decoration.
 
 colors:
-  bg-dark: "#0E0E13"        # hsl(240 20% 6%) — app canvas
-  bg-card: "#13131B"        # hsl(240 21% 9%) — flat surface fill (cards, panels, table)
-  bg-input: "#14141E99"     # rgba(20,20,30,0.6)
-  primary: "#8B66E1"        # hsl(258 67% 64%) — desaturated violet accent
-  secondary: "#DA62AE"      # hsl(322 62% 62%) — pink, used ONLY in the logo gradient
-  success: "#21C45D"        # hsl(142 71% 45%)
+  bg-dark: "#09090B"        # hsl(240 10% 3.9%) — app canvas
+  bg-card: "#0F0F12"        # hsl(240 10% 5.9%) — flat surface fill (cards, panels, table)
+  bg-input: "#18181B"       # hsl(240 10% 8.9%)
+  primary: "#FAFAFA"        # hsl(0 0% 98%) — off-white primary accent
+  secondary: "#E4E4E7"      # hsl(240 5% 84.1%) — zinc-200 secondary accent
+  success: "#10B981"        # hsl(142 71% 45%)
   warning: "#F59E0B"        # hsl(38 92% 50%)
   text-primary: "#FAFAFA"   # hsl(0 0% 98%)
-  text-secondary: "#BCBCC2" # hsl(240 5% 75%)
-  text-muted: "#78788A"     # hsl(240 5% 50%)
-  border: "#FFFFFF1A"       # rgba(255,255,255,0.1) — hairline
-  border-hover: "#7C63DE59" # rgba(124,99,222,0.35)
+  text-secondary: "#A1A1AA" # hsl(240 5% 64.9%)
+  text-muted: "#71717A"     # hsl(240 3.8% 46.1%)
+  border: "#27272A"         # hsl(240 5.9% 15%) — hairline
+  border-hover: "#3F3F46"   # hsl(240 5.9% 25%)
 
 typography:
   display:
@@ -66,9 +65,9 @@ spacing:
   scale: [4, 8, 12, 16, 24, 28, 32, 40, 48, 56]
 
 rounded:
-  sm: 8px
-  md: 12px
-  lg: 16px
+  sm: 4px
+  md: 6px
+  lg: 8px
   pill: 20px
   full: 9999px
 
@@ -81,14 +80,14 @@ components:
     padding: 28px
   button-primary:
     backgroundColor: "{colors.primary}"
-    textColor: "{colors.text-primary}"
+    textColor: "{colors.bg-dark}"
     typography: "{typography.body}"
     rounded: "{rounded.sm}"
     padding: 12px 28px
   input-group:
     backgroundColor: "{colors.bg-input}"
     border: "1px solid {colors.border}"
-    focusRing: "0 0 0 2px rgba(124,99,222,0.25)"
+    focusRing: "0 0 0 2px rgba(255,255,255,0.03)"
     rounded: "{rounded.md}"
     padding: 8px
   topic-badge:
@@ -107,7 +106,7 @@ components:
 # Design Analysis — Transcriber (Reels Insight Extractor)
 
 > Analysis generated with the `anydesign` skill.
-> Date: 2026-06-06 (refreshed after the "restraint pass")
+> Date: 2026-06-08 (refreshed after the "restraint pass")
 > Analysis emphasis: design system + reconstruction
 
 ---
@@ -123,7 +122,7 @@ components:
 
 ## TL;DR
 
-A calm, restrained dark dashboard: near-black blue canvas, flat solid cards with crisp hairlines and a faint top highlight, and **one** desaturated violet accent (`{colors.primary}` #8B66E1) reserved for primary actions and focus/active states. The only gradient in the entire system is the violet→pink logo wordmark; there is no motion and no glow. This is a deliberate post-"AI-slop" cleanup — depth now comes from typography, spacing, and hairlines rather than gradients and animation.
+A premium dark monochrome dashboard: zinc-950 canvas with a subtle geometric background grid, flat solid cards with crisp hairlines and a faint top highlight, and a single off-white accent (`{colors.primary}` #FAFAFA) reserved for primary actions and focus/active states. The logo text transitions in a clean white-to-zinc gradient; there is no motion and no glow. This is a deliberate post-"AI-slop" cleanup — depth now comes from typography, spacing, and hairlines rather than gradients and animation.
 
 ---
 
@@ -145,15 +144,15 @@ A calm, restrained dark dashboard: near-black blue canvas, flat solid cards with
 
 ### 1.2 Brand voice / Atmosphere
 
-This design believes its user is a focused maker who reads software by its restraint. After an earlier glow-and-gradient phase, the system was deliberately pulled back to a flat-first dark surface: solid cards, hairline borders, a single faint inset top-highlight for craft, and exactly one accent color. The conviction is that *intention reads as quality* — a violet that appears only on the primary button, the active toggle, and focus rings feels considered, where a violet on every surface read as generated.
+This design believes its user is a focused maker who reads software by its restraint. After an earlier glow-and-gradient phase, the system was deliberately pulled back to a flat-first dark surface: solid cards, hairline borders, a single faint inset top-highlight for craft, and exactly one accent color. The conviction is that *intention reads as quality* — an off-white accent that appears only on the primary button, active toggle outlines, and focus rings feels considered, where a colorful violet on every surface read as generated.
 
-Motion was removed for the same reason: the animated mesh and pulsing logo were atmosphere for atmosphere's sake. The product now lets hierarchy come from type weight (Plus Jakarta 800 vs 400) and spacing. The one indulgence kept — the violet→pink gradient on the logo wordmark — survives precisely *because* it is the only one; it carries the brand alone.
+Motion was removed for the same reason: the animated mesh and pulsing logo were atmosphere for atmosphere's sake. The product now lets hierarchy come from type weight (Plus Jakarta 800 vs 400) and spacing. The logo wordmark uses a clean, premium white-to-zinc gradient that keeps branding extremely sleek and understated.
 
 ### 1.3 The "ONE brand thing"
 
-- **The thing**: the **violet→pink gradient on the logo wordmark** (`linear-gradient(135deg, #8B66E1, #DA62AE)` clipped to text). It is now the single gradient in the whole product.
-- **Why it carries the brand**: it is the only saturated, only gradient, only "expressive" gesture. Remove it and the UI is a tasteful but anonymous dark dashboard.
-- **How everything else supports it**: every other surface is flat neutral; the accent elsewhere is a flat, desaturated single violet. Nothing competes.
+- **The thing**: the **white-to-zinc gradient on the logo wordmark** (`linear-gradient(135deg, #ffffff 40%, var(--text-secondary))` clipped to text). It is now the single gradient in the whole product.
+- **Why it carries the brand**: it is the only gradient, only "expressive" gesture. Remove it and the UI is a tasteful but anonymous dark dashboard.
+- **How everything else supports it**: every other surface is flat neutral; the accent elsewhere is a flat, solid off-white. Nothing competes.
 - **Where it appears (and where it doesn't)**: logo wordmark only. It deliberately does NOT appear on buttons, badges, banners, or backgrounds anymore.
 
 *Confidence*: ✅ high.
@@ -166,20 +165,20 @@ Motion was removed for the same reason: the animated mesh and pulsing logo were 
 
 | Token | Value (authoritative) | Hex approx | Role | Where | Confidence |
 |---|---|---|---|---|---|
-| `bg-dark` | `hsl(240 20% 6%)` | `#0E0E13` | App canvas | `body` | ✅ |
-| `bg-card` | `hsl(240 21% 9%)` | `#13131B` | Flat surface fill | cards, panels, table, search | ✅ |
-| `bg-input` | `rgba(20,20,30,0.6)` | `#14141E99` | Input fields, selects | url-input, controls | ✅ |
-| `primary` | `hsl(258 67% 64%)` | `#8B66E1` | Accent — CTA, active, focus | buttons, toggle, rings | ✅ |
-| `secondary` | `hsl(322 62% 62%)` | `#DA62AE` | Logo gradient end ONLY | `.logo-text` | ✅ |
-| `success` | `hsl(142 71% 45%)` | `#21C45D` | Completed steps | step.completed | ✅ |
+| `bg-dark` | `hsl(240 10% 3.9%)` | `#09090B` | App canvas | `body` | ✅ |
+| `bg-card` | `hsl(240 10% 5.9%)` | `#0F0F12` | Flat surface fill | cards, panels, table, search | ✅ |
+| `bg-input` | `hsl(240 10% 8.9%)` | `#18181B` | Input fields, selects | url-input, controls | ✅ |
+| `primary` | `hsl(0 0% 98%)` | `#FAFAFA` | Accent — CTA, active, focus | buttons, toggle, rings | ✅ |
+| `secondary` | `hsl(240 5% 84.1%)` | `#E4E4E7` | Zinc-200 secondary accent | logo gradient end ONLY | ✅ |
+| `success` | `hsl(142 71% 45%)` | `#10B981` | Completed steps | step.completed | ✅ |
 | `warning` | `hsl(38 92% 50%)` | `#F59E0B` | Wake-up alert | `.wake-alert` | ✅ |
 | `text-primary` | `hsl(0 0% 98%)` | `#FAFAFA` | Main text | headings, body | ✅ |
-| `text-secondary` | `hsl(240 5% 75%)` | `#BCBCC2` | Secondary text | takeaways, chips | ✅ |
-| `text-muted` | `hsl(240 5% 50%)` | `#78788A` | Tertiary text | dates, captions, th | ✅ |
-| `border` | `rgba(255,255,255,0.1)` | `#FFFFFF1A` | Hairline | borders, dividers | ✅ |
-| `border-hover` | `rgba(124,99,222,0.35)` | `#7C63DE59` | Hover border | interactive surfaces | ✅ |
+| `text-secondary` | `hsl(240 5% 64.9%)` | `#A1A1AA` | Secondary text | takeaways, chips | ✅ |
+| `text-muted` | `hsl(240 3.8% 46.1%)` | `#71717A` | Tertiary text | dates, captions, th | ✅ |
+| `border` | `hsl(240 5.9% 15%)` | `#27272A` | Hairline | borders, dividers | ✅ |
+| `border-hover` | `hsl(240 5.9% 25%)` | `#3F3F46` | Hover border | interactive surfaces | ✅ |
 
-The system is now a **single-accent** palette: text + neutrals + one violet + feedback semantics (success/warning). Pink exists only inside the logo gradient.
+The system is now a **single-accent** palette: text + neutrals + one off-white + feedback semantics (success/warning).
 
 ### 2.2 Typography
 
@@ -214,23 +213,23 @@ Flat-first. Depth = hairline + a 1px inset top highlight; real blur is reserved 
 |---|---|---|---|
 | 0 | Flat | no chrome | body canvas |
 | 1 | Crafted surface | `bg-card` + `1px {colors.border}` + `inset 0 1px 0 rgba(255,255,255,0.03)` | default cards/panels |
-| 2 | Hover | violet hairline + `inset highlight, 0 6px 22px rgba(0,0,0,0.35)` | `.glass-interactive:hover` |
-| 3 | Focus | crisp `0 0 0 2px rgba(124,99,222,0.25)` ring + violet border | inputs, selects |
+| 2 | Hover | zinc-700 hairline + `inset highlight, 0 6px 22px rgba(0,0,0,0.35)` | `.glass-interactive:hover` |
+| 3 | Focus | crisp `0 0 0 2px rgba(255,255,255,0.03)` ring + off-white border | inputs, selects |
 | 4 | Modal | `0 20px 50px rgba(0,0,0,0.6)` over a `blur(12px)` **overlay** | dialogs |
 
 #### Decorative depth (non-functional)
 
-- **Single static wash**: one fixed low-opacity radial `rgba(124,99,222,0.06)` top-left on `body::before`. No animation. (The previous 3-gradient pulsing mesh + logo-glow animation were removed.)
+- **Geometric grid**: a subtle white grid overlay (`background-size: 40px 40px`) on `body::before` to establish structure. No animation.
 
 ### 2.6 Borders
 
-- Hairline: `rgba(255,255,255,0.1)` 1px, used for card borders and the dashboard header divider.
-- Hover: violet `rgba(124,99,222,0.35)`.
-- Focus: crisp 2px violet ring (`rgba(124,99,222,0.25)`) — not a blurred glow.
+- Hairline: `hsl(240 5.9% 15%)` 1px, used for card borders and the dashboard header divider.
+- Hover: zinc-700 `hsl(240 5.9% 25%)`.
+- Focus: crisp 2px off-white ring (`rgba(255,255,255,0.03)`) — not a blurred glow.
 
 ### 2.7 Accessibility quick-check
 
-See companion `design-a11y.md`. `text-primary` on canvas ≈ 18:1 (AAA ✅). Watch `text-muted` (#78788A) on `bg-card` for small text (borderline AA). The desaturated violet on dark improves slightly over the old neon.
+See companion `design-a11y.md`. `text-primary` on canvas ≈ 18.96:1 (AAA ✅). Watch `text-muted` (#71717A) on `bg-card` for small text (borderline AA). The off-white primary button text is fully accessible on the dark background.
 
 ---
 
@@ -239,18 +238,18 @@ See companion `design-a11y.md`. `text-primary` on canvas ≈ 18:1 (AAA ✅). Wat
 ### 3.1 Generic components
 
 #### button-primary
-- **Variants**: primary (**solid** `{colors.primary}`), ghost/alt (`.alt-input-btn`, transparent violet text).
-- **States**: default, hover (darken to `hsl(258 67% 58%)` + `translateY(-1px)`, no glow), disabled (opacity 0.6).
+- **Variants**: primary (**solid** `{colors.primary}`), ghost/alt (`.alt-input-btn`, transparent white text).
+- **States**: default, hover (darken to `var(--accent-secondary)` + `translateY(-1px)`, no glow), disabled (opacity 0.6).
 - **Padding**: 12px 28px. **Radius**: `{rounded.sm}`. **Confidence**: ✅.
 
 #### input-group
-- Frosted-free dark group with left icon; `:focus-within` → violet border + crisp 2px ring. ✅
+- Frosted-free dark group with left icon; `:focus-within` → off-white border + crisp 2px ring. ✅
 
 #### search-bar
 - Flat `bg-card` pill, icon + transparent input, max-width 400px. ✅
 
 #### glass-card (`.reel-card` on `.glass`)
-- Flat `bg-card` + hairline + inset top highlight; neutral topic badge + date, 2-line title, 3-line takeaway, footer with task count + "View details". Hover = violet hairline + soft shadow. ✅
+- Flat `bg-card` + hairline + inset top highlight; topic badge + date, 2-line title, 3-line takeaway, footer with task count + "View details". Hover = zinc-700 hairline + soft shadow. ✅
 
 #### topic-badge
 - Neutral light chip (`rgba(255,255,255,0.06)`, `text-secondary`) for topic/cluster; `tool-tag`/`tool-chip` are the same neutral family. Color is no longer used decoratively. ✅
@@ -258,10 +257,10 @@ See companion `design-a11y.md`. `text-primary` on canvas ≈ 18:1 (AAA ✅). Wat
 ### 3.2 Signature components
 
 #### Pipeline step-tracker
-- 6-node horizontal progress (Server→Fetch→Audio→Transcribe→Llama→Save); active = violet border/fill (no glow), completed = green. Turns a single API call into a watchable process. ✅
+- 6-node progress (Server→Fetch→Audio→Transcribe→Llama→Save); active = off-white border/fill (no glow), completed = green. Turns a single API call into a watchable progress. ✅
 
 #### Gradient-text logo
-- Wordmark in clipped violet→pink gradient — the lone gradient and the brand's one expressive gesture. ✅
+- Wordmark in clipped white-to-zinc gradient — the lone gradient and the brand's one expressive gesture. ✅
 
 *(The animated aurora mesh was removed in the restraint pass and is no longer a signature element.)*
 
@@ -326,21 +325,21 @@ Vanilla CSS with custom properties (current). The token layer in `index.css` is 
 ## 6. Do's and Don'ts
 
 ### Do
-- **Keep the gradient on the logo wordmark only.** It is the one expressive gesture; everything else is flat.
-- **Use the solid violet `{colors.primary}` (#8B66E1) for primary actions, active, and focus** — nowhere decorative.
+- **Keep the gradient on the logo wordmark only. It is the one expressive gesture; everything else is flat.**
+- **Use the solid off-white `{colors.primary}` (#FAFAFA) for primary actions, active, and focus** — nowhere decorative.
 - **Build surfaces from `.glass`** (now flat `bg-card` + hairline + inset top highlight); reuse it for cards, panels, tables.
 - **Reserve `backdrop-filter` blur for the modal overlay** — the single depth moment.
 - **Use neutral chips** (`rgba(255,255,255,0.06)`) for topics/clusters/tools; reserve color for status (success/warning).
-- **Show focus as a crisp 2px violet ring** (`rgba(124,99,222,0.25)`), never a blurred glow.
+- **Show focus as a crisp 2px off-white ring** (`rgba(255,255,255,0.03)`), never a blurred glow.
 - **Drive hierarchy with type weight and spacing** (800 vs 400) plus hairline dividers.
 
 ### Don't
 - **Don't add a second gradient** anywhere outside the logo — buttons, badges, banners stay solid.
 - **Don't reintroduce ambient motion** (pulsing meshes, glowing logos) — it reads as AI-generated.
 - **Don't use glow/drop-shadow as decoration** — depth is hairline + inset highlight + one soft modal shadow.
-- **Don't color chips by vibe** — violet/decorative pills are out; color must carry meaning.
+- **Don't color chips by vibe** — decorative pills are out; color must carry meaning.
 - **Don't apply `backdrop-filter` to cards or the table** — only the modal overlay.
-- **Don't introduce a third accent** — the system is text + neutral + one violet + feedback semantics.
+- **Don't introduce a second accent** — the system is text + neutral + one off-white + feedback semantics.
 
 ---
 
