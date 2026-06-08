@@ -101,6 +101,18 @@ components:
     border: "1px solid {colors.border}"
     rounded: "{rounded.sm}"
     padding: 10px 16px
+  skeleton-card:
+    backgroundColor: "{colors.bg-card}"
+    border: "1px solid {colors.border}"
+    rounded: "{rounded.lg}"
+    padding: 28px
+    animation: "shimmer 1.5s infinite linear"
+  wake-pulse:
+    backgroundColor: "{colors.warning}"
+    rounded: "{rounded.full}"
+    width: 14px
+    height: 14px
+    animation: "pulse 1.5s infinite ease-in-out"
 ---
 
 # Design Analysis — Transcriber (Reels Insight Extractor)
@@ -264,6 +276,21 @@ See companion `design-a11y.md`. `text-primary` on canvas ≈ 18.96:1 (AAA ✅). 
 
 *(The animated aurora mesh was removed in the restraint pass and is no longer a signature element.)*
 
+### 3.3 Loading & Placeholder components
+
+#### skeleton-card
+- **Role**: Replaces grid card layouts during initial loading or fetch states.
+- **Structure**: Uses the exact dimensions and grid constraints of `.glass-interactive.reel-card`. Consists of a circular avatar block, a badge block, a two-line title/takeaway text placeholder, and a footer placeholder with a standard shimmer gradient overlay.
+- **Animation**: Smooth `.shimmer` linear gradient background moving horizontally from left to right.
+
+#### table-skeleton
+- **Role**: Replaces table row structures during fetching states when the user is in table view mode.
+- **Structure**: Replaces row content with horizontal skeleton lines within standard table cells to prevent layout shifting.
+
+#### wake-pulse
+- **Role**: Subtle indicator for background status checks (like the server health monitor).
+- **Structure**: A small colored circle (`14px` size) utilizing `--accent-warning` and pulsing via scale/opacity shifts, replacing traditional rotating loading spinners.
+
 ---
 
 ## 4. Layout & Composition
@@ -332,6 +359,8 @@ Vanilla CSS with custom properties (current). The token layer in `index.css` is 
 - **Use neutral chips** (`rgba(255,255,255,0.06)`) for topics/clusters/tools; reserve color for status (success/warning).
 - **Show focus as a crisp 2px off-white ring** (`rgba(255,255,255,0.03)`), never a blurred glow.
 - **Drive hierarchy with type weight and spacing** (800 vs 400) plus hairline dividers.
+- **Use shimmer skeleton cards and rows during initial fetching states to prevent layout shifts.** Skeletons should match the structural size and placement of actual list/table items.
+- **Replace rotational loading spinners with subtle pulsing status indicators (`.wake-pulse`) for alerts and notice banners.**
 
 ### Don't
 - **Don't add a second gradient** anywhere outside the logo — buttons, badges, banners stay solid.
@@ -340,6 +369,7 @@ Vanilla CSS with custom properties (current). The token layer in `index.css` is 
 - **Don't color chips by vibe** — decorative pills are out; color must carry meaning.
 - **Don't apply `backdrop-filter` to cards or the table** — only the modal overlay.
 - **Don't introduce a second accent** — the system is text + neutral + one off-white + feedback semantics.
+- **Don't use infinite spin animations/spinners for content loading.** They feel slow and break the premium dark monochrome design language. Use shimmer skeleton screens instead.
 
 ---
 
