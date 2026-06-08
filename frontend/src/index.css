@@ -723,18 +723,118 @@ body::before {
   font-size: 0.9rem;
 }
 
-.wake-spinner {
-  border: 2px solid rgba(245, 158, 11, 0.1);
-  border-left-color: var(--accent-warning);
+.wake-pulse {
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
-  width: 18px;
-  height: 18px;
-  animation: spin 1s linear infinite;
+  background: var(--accent-warning);
+  opacity: 0.8;
+  animation: pulse 1.5s infinite ease-in-out;
+  flex-shrink: 0;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+@keyframes pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.5;
+  }
 }
+
+/* Skeleton Screen Styles */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.02) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.02) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+}
+
+.skeleton-card {
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 1.75rem;
+}
+
+.skeleton-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.skeleton-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.skeleton-badge {
+  height: 22px;
+  width: 90px;
+  border-radius: 20px;
+}
+
+.skeleton-title {
+  height: 20px;
+  width: 85%;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.75rem;
+}
+
+.skeleton-text {
+  height: 14px;
+  width: 100%;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+}
+
+.skeleton-text.short {
+  width: 65%;
+  margin-bottom: 1.5rem;
+}
+
+.skeleton-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: auto;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.skeleton-line {
+  height: 14px;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-table tbody tr.skeleton-row:hover {
+  background: transparent !important;
+  cursor: default;
+}
+
 
 .empty-state {
   text-align: center;

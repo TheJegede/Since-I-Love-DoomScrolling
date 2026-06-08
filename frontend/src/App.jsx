@@ -36,12 +36,62 @@ function computeClusters(reels) {
     .sort((a, b) => b.count - a.count);
 }
 
+function Skeleton() {
+  return (
+    <div className="glass reel-card skeleton-card">
+      <div className="skeleton-header">
+        <div className="skeleton-avatar shimmer"></div>
+        <div className="skeleton-badge shimmer"></div>
+      </div>
+      <div className="skeleton-title shimmer"></div>
+      <div className="skeleton-text shimmer"></div>
+      <div className="skeleton-text short shimmer"></div>
+      <div className="skeleton-footer">
+        <div className="skeleton-line shimmer" style={{ width: '60px' }}></div>
+        <div className="skeleton-line shimmer" style={{ width: '80px' }}></div>
+      </div>
+    </div>
+  );
+}
+
+function TableSkeleton() {
+  return (
+    <div className="table-scroll">
+      <table className="insights-table glass skeleton-table">
+        <thead>
+          <tr>
+            <th>Topic</th><th>Cluster</th><th>Key takeaway</th><th>Tools</th><th>Saved</th><th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {[1, 2, 3, 4, 5].map(i => (
+            <tr key={i} className="skeleton-row">
+              <td><div className="skeleton-line shimmer" style={{ width: '120px', height: '16px' }}></div></td>
+              <td><div className="skeleton-badge shimmer" style={{ width: '80px' }}></div></td>
+              <td><div className="skeleton-line shimmer" style={{ width: '90%', height: '14px' }}></div></td>
+              <td>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <div className="skeleton-line shimmer" style={{ width: '50px', height: '18px', borderRadius: '4px' }}></div>
+                  <div className="skeleton-line shimmer" style={{ width: '65px', height: '18px', borderRadius: '4px' }}></div>
+                </div>
+              </td>
+              <td><div className="skeleton-line shimmer" style={{ width: '75px', height: '14px' }}></div></td>
+              <td><div className="skeleton-line shimmer" style={{ width: '20px', height: '20px', borderRadius: '4px' }}></div></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export default function App() {
   const [url, setUrl] = useState('');
   const [mode, setMode] = useState('url'); // 'url', 'file', 'text'
   const [reels, setReels] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetching, setIsFetching] = useState(true);
   const [isWakingUp, setIsWakingUp] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState(null);
@@ -123,6 +173,8 @@ export default function App() {
       }
     } catch (err) {
       console.error("Error fetching reels", err);
+    } finally {
+      setIsFetching(false);
     }
   };
 
@@ -450,7 +502,7 @@ export default function App() {
       {/* Backend Wake-up Notice */}
       {isWakingUp && (
         <div className="wake-alert">
-          <div className="wake-spinner"></div>
+          <div className="wake-pulse"></div>
           <div>
             <strong>Connecting to local extraction server...</strong> Ingestion and cluster recomputation require the backend to be running locally.
           </div>
@@ -732,7 +784,15 @@ export default function App() {
           </div>
         )}
 
-        {reels.length === 0 ? (
+        {isFetching ? (
+          viewMode === 'table' ? (
+            <TableSkeleton />
+          ) : (
+            <div className="reels-grid">
+              {[1, 2, 3, 4, 5, 6].map(i => <Skeleton key={i} />)}
+            </div>
+          )
+        ) : reels.length === 0 ? (
           <div className="glass empty-state">
             <Sparkles size={48} className="empty-state-icon" style={{ margin: '0 auto 1rem auto' }} />
             <p>No extractions found. Input a Reel URL above to kickstart the autonomous pipeline!</p>
