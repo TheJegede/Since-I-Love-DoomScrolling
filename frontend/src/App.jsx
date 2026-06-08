@@ -588,13 +588,13 @@ export default function App() {
                 onChange={(e) => setTextTitle(e.target.value)}
               />
               <textarea
-                style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem', height: '80px', color: 'white', fontFamily: 'inherit', resize: 'vertical' }}
+                style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem', height: '80px', color: 'var(--text-primary)', fontFamily: 'inherit', resize: 'vertical' }}
                 placeholder="Instagram Post Caption / Description"
                 value={textCaption}
                 onChange={(e) => setTextCaption(e.target.value)}
               />
               <textarea
-                style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem', height: '140px', color: 'white', fontFamily: 'inherit', resize: 'vertical' }}
+                style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem', height: '140px', color: 'var(--text-primary)', fontFamily: 'inherit', resize: 'vertical' }}
                 placeholder="Audio Transcript (Paste voice transcript if available)"
                 value={textTranscript}
                 onChange={(e) => setTextTranscript(e.target.value)}
