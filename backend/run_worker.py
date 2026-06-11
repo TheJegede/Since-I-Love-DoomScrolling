@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import logging
 from dotenv import load_dotenv
@@ -22,10 +23,22 @@ if __name__ == "__main__":
         logger.error("SUPABASE_URL / SUPABASE_SERVICE_KEY env vars not set. Exiting.")
         exit(1)
         
+    drain_mode = "--drain" in sys.argv
+    if drain_mode:
+        logger.info("Running in DRAIN mode. Will exit once queue is empty.")
+        
     while True:
         try:
             did_work = worker_tick()
         except Exception as e:
             logger.error(f"Worker tick crashed: {str(e)}")
             did_work = False
+            if drain_mode:
+                break
+        
+        if drain_mode and not did_work:
+            logger.info("No more pending reels in queue. Exiting drain worker.")
+            break
+            
         time.sleep(5.0 if did_work else 20.0)
+
