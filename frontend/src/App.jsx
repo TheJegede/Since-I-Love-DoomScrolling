@@ -178,16 +178,10 @@ export default function App() {
     }
   };
 
-  const fetchClusters = async () => {
-    // Clusters are derived from the loaded reels (see fetchReels/computeClusters).
-    // Kept as a callable so existing call sites (e.g. after recompute) still work.
-  };
-
   // Fetch reels from Supabase on mount
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchReels();
-    fetchClusters();
     checkBackendHealth();
   }, []);
 
@@ -209,7 +203,6 @@ export default function App() {
         throw new Error(errData.detail || 'Recompute failed.');
       }
       await fetchReels();
-      await fetchClusters();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -397,7 +390,6 @@ export default function App() {
       if (job.status !== 'running') {
         setIsBatchRunning(false);
         fetchReels();
-        fetchClusters();
       }
     } catch (err) {
       console.error("Error polling batch status", err);

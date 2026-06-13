@@ -12,7 +12,7 @@ import App from '../App';
 beforeEach(() => {
   vi.restoreAllMocks();
   // /health ok, /reels empty by default
-  global.fetch = vi.fn((input) => {
+  globalThis.fetch = vi.fn((input) => {
     const u = String(input);
     if (u.endsWith('/health')) return Promise.resolve({ ok: true });
     if (u.includes('/reels')) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
