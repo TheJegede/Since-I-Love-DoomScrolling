@@ -1,9 +1,11 @@
 import os
 import json
 import time
+import uuid
 import threading
 import tempfile
 import logging
+from datetime import datetime, timezone
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -774,7 +776,6 @@ async def update_batch_job_status():
     
     if processing == 0:
         BATCH_JOB["status"] = "done"
-        from datetime import datetime, timezone
         BATCH_JOB["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
@@ -812,8 +813,6 @@ async def extract_batch(file: UploadFile = File(...)):
     
     enqueued_count = 0
     if new_reels:
-        import uuid
-        from datetime import datetime, timezone
         rows_to_insert = [
             {
                 "id": str(uuid.uuid4()),
@@ -835,7 +834,6 @@ async def extract_batch(file: UploadFile = File(...)):
         enqueued_count = len(rows_to_insert)
 
     # Initialize batch tracking state
-    from datetime import datetime, timezone
     BATCH_JOB.update({
         "status": "running" if enqueued_count > 0 else "done",
         "total": len(urls),
