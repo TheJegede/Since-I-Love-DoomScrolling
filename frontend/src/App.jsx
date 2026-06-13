@@ -137,6 +137,13 @@ export default function App() {
     { num: 6, label: "Save DB" }
   ];
 
+  const ingestionTabs = [
+    { key: 'url', label: 'Reel URL', Icon: Link },
+    { key: 'file', label: 'Audio File', Icon: FileAudio },
+    { key: 'text', label: 'Transcript Text', Icon: FileText },
+    { key: 'bulk', label: 'Bulk Import', Icon: UploadCloud },
+  ];
+
   const checkBackendHealth = async () => {
     try {
       setIsWakingUp(true);
@@ -515,34 +522,20 @@ export default function App() {
       {/* Extraction Ingestion Panel */}
       <section className="glass ingestion-panel">
         <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
-          <button 
-            className={`alt-input-btn ${mode === 'url' ? 'active' : ''}`}
-            onClick={() => setMode('url')}
-            style={{ borderBottom: mode === 'url' ? '2px solid var(--accent-primary)' : 'none', paddingBottom: '0.5rem', color: mode === 'url' ? 'var(--text-primary)' : 'var(--text-muted)' }}
-          >
-            <Link size={16} /> Reel URL
-          </button>
-          <button 
-            className={`alt-input-btn ${mode === 'file' ? 'active' : ''}`}
-            onClick={() => setMode('file')}
-            style={{ borderBottom: mode === 'file' ? '2px solid var(--accent-primary)' : 'none', paddingBottom: '0.5rem', color: mode === 'file' ? 'var(--text-primary)' : 'var(--text-muted)' }}
-          >
-            <FileAudio size={16} /> Audio File
-          </button>
-          <button 
-            className={`alt-input-btn ${mode === 'text' ? 'active' : ''}`}
-            onClick={() => setMode('text')}
-            style={{ borderBottom: mode === 'text' ? '2px solid var(--accent-primary)' : 'none', paddingBottom: '0.5rem', color: mode === 'text' ? 'var(--text-primary)' : 'var(--text-muted)' }}
-          >
-            <FileText size={16} /> Transcript Text
-          </button>
-          <button 
-            className={`alt-input-btn ${mode === 'bulk' ? 'active' : ''}`}
-            onClick={() => setMode('bulk')}
-            style={{ borderBottom: mode === 'bulk' ? '2px solid var(--accent-primary)' : 'none', paddingBottom: '0.5rem', color: mode === 'bulk' ? 'var(--text-primary)' : 'var(--text-muted)' }}
-          >
-            <UploadCloud size={16} /> Bulk Import
-          </button>
+          {ingestionTabs.map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              className={`alt-input-btn ${mode === key ? 'active' : ''}`}
+              onClick={() => setMode(key)}
+              style={{
+                borderBottom: mode === key ? '2px solid var(--accent-primary)' : 'none',
+                paddingBottom: '0.5rem',
+                color: mode === key ? 'var(--text-primary)' : 'var(--text-muted)',
+              }}
+            >
+              <Icon size={16} /> {label}
+            </button>
+          ))}
         </div>
 
         {/* Input Methods */}
