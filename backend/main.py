@@ -523,18 +523,13 @@ def list_clusters():
         logger.error(f"Failed to list clusters: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to list clusters: {str(e)}")
 
-def process_reel_url(url: str) -> dict:
-    """Full single-reel pipeline. Returns the saved DB record.
+def _run_pipeline(url: str) -> tuple[str, str, str, ReelExtraction]:
+    """Download → transcribe → silent-hook guard → LLM extract for one reel.
 
-    Returns the cached row if this URL was already processed. Raises
-    HTTPException(400) on silent-hook reels (no spoken content). Always
-    cleans up the temp audio file. Used by /extract/url and the queue worker."""
-    # Cache: skip inference if we already have this URL
-    cached = db.get_reel_by_url(url)
-    if cached:
-        logger.info(f"Returning cached record for URL: {url}")
-        return cached
-
+    Owns the temp audio file (always cleaned up). Returns
+    (title, raw_transcript, post_caption, extracted). Raises HTTPException(400)
+    on silent-hook reels and HTTPException(500) on download/transcription/LLM
+    failures. Callers handle persistence."""
     mp3_path = None
     try:
         mp3_path, post_caption, title = download_and_extract_audio(url)
@@ -544,14 +539,8 @@ def process_reel_url(url: str) -> dict:
         except Exception as e:
             logger.warning(f"Transcription failed: {str(e)}. Proceeding using metadata/caption only.")
         guard_silent_hook(raw_transcript, post_caption)
-        extracted_data = extract_structured_json(raw_transcript, post_caption)
-        return save_to_database(
-            url=url,
-            title=title,
-            raw_transcript=raw_transcript,
-            post_caption=post_caption,
-            extracted=extracted_data,
-        )
+        extracted = extract_structured_json(raw_transcript, post_caption)
+        return title, raw_transcript, post_caption, extracted
     finally:
         if mp3_path and os.path.exists(mp3_path):
             try:
@@ -559,6 +548,27 @@ def process_reel_url(url: str) -> dict:
                 logger.info(f"Cleaned up temporary audio file: {mp3_path}")
             except Exception as ce:
                 logger.warning(f"Could not delete temp file {mp3_path}: {str(ce)}")
+
+
+def process_reel_url(url: str) -> dict:
+    """Full single-reel pipeline. Returns the saved DB record.
+
+    Returns the cached row if this URL was already processed. Raises
+    HTTPException(400) on silent-hook reels (no spoken content). Used by
+    /extract/url and (indirectly) the queue worker."""
+    cached = db.get_reel_by_url(url)
+    if cached:
+        logger.info(f"Returning cached record for URL: {url}")
+        return cached
+
+    title, raw_transcript, post_caption, extracted = _run_pipeline(url)
+    return save_to_database(
+        url=url,
+        title=title,
+        raw_transcript=raw_transcript,
+        post_caption=post_caption,
+        extracted=extracted,
+    )
 
 
 @app.post("/extract/url", response_model=ExtractionResponse)
@@ -578,16 +588,8 @@ def process_pending_reel(row: dict) -> None:
     can be retried later by resetting its status to 'pending'."""
     reel_id = row["id"]
     url = row["url"]
-    mp3_path = None
     try:
-        mp3_path, post_caption, title = download_and_extract_audio(url)
-        raw_transcript = ""
-        try:
-            raw_transcript = transcribe_audio(mp3_path)
-        except Exception as e:
-            logger.warning(f"Transcription failed: {str(e)}. Using caption only.")
-        guard_silent_hook(raw_transcript, post_caption)
-        extracted = extract_structured_json(raw_transcript, post_caption)
+        title, raw_transcript, post_caption, extracted = _run_pipeline(url)
         db.update_reel_result(
             reel_id=reel_id,
             title=title,
@@ -602,12 +604,6 @@ def process_pending_reel(row: dict) -> None:
     except Exception as e:
         logger.error(f"Worker error on reel {reel_id}: {str(e)}")
         db.mark_failed(reel_id, str(e))
-    finally:
-        if mp3_path and os.path.exists(mp3_path):
-            try:
-                os.remove(mp3_path)
-            except Exception as ce:
-                logger.warning(f"Could not delete temp file {mp3_path}: {str(ce)}")
 
 
 def worker_tick() -> bool:
