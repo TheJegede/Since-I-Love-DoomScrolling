@@ -364,6 +364,20 @@ def test_reels_include_cluster():
         main.db.list_reels = orig
 
 
+def test_cors_no_credentials():
+    print("Testing CORS does not advertise credentials with wildcard origin...")
+    r = client.options(
+        "/health",
+        headers={
+            "Origin": "https://reels-transcriber.vercel.app",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    # With allow_credentials=False, Starlette must NOT emit this header as true.
+    assert r.headers.get("access-control-allow-credentials") != "true", dict(r.headers)
+    print("[OK] CORS no-credentials passed!")
+
+
 def test_chunked_helper():
     print("Testing _chunked splits sequences into fixed-size lists...")
     from main import _chunked
@@ -548,6 +562,7 @@ if __name__ == "__main__":
     test_delete_reel()
     test_list_clusters()
     test_reels_include_cluster()
+    test_cors_no_credentials()
     test_chunked_helper()
     test_parse_saved_posts()
     test_batch_status_initial()
