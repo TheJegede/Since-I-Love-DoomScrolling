@@ -192,6 +192,16 @@ def test_cluster_merge_pass():
         main.CLUSTER_CHUNK_DELAY = orig_delay
 
 
+def test_row_to_record_handles_bad_json():
+    print("Testing row_to_record tolerates malformed extracted_json...")
+    import db
+    rec = db.row_to_record({"id": "1", "extracted_json": "{not valid json"})
+    assert rec["extracted_json"] == {}, rec
+    rec2 = db.row_to_record({"id": "2", "extracted_json": '{"core_topic": "x"}'})
+    assert rec2["extracted_json"]["core_topic"] == "x", rec2
+    print("[OK] row_to_record bad-json guard passed!")
+
+
 def test_db_module_surface():
     print("Testing db.py exposes the expected data-layer functions...")
     import db
@@ -528,6 +538,7 @@ if __name__ == "__main__":
     test_recompute_clusters_mock()
     test_cluster_chunking()
     test_cluster_merge_pass()
+    test_row_to_record_handles_bad_json()
     test_db_module_surface()
     test_db_queue_surface()
     test_worker_tick_success()

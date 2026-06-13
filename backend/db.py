@@ -33,7 +33,10 @@ def row_to_record(r: dict) -> dict:
     """Map a raw DB row to the API record shape the frontend expects."""
     ej = r.get("extracted_json")
     if isinstance(ej, str):
-        ej = json.loads(ej)
+        try:
+            ej = json.loads(ej)
+        except (json.JSONDecodeError, TypeError):
+            ej = {}
     return {
         "id": r["id"],
         "url": r.get("url"),
