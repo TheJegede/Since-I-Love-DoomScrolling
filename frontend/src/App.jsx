@@ -4,6 +4,7 @@ import { supabase, rowToRecord } from './supabaseClient';
 import { Skeleton, TableSkeleton } from './components/Skeletons';
 import ReelModal from './components/ReelModal';
 import InsightsTable from './components/InsightsTable';
+import ReelCard from './components/ReelCard';
 import {
   Clapperboard,
   Search,
@@ -11,14 +12,12 @@ import {
   FileText, 
   Link, 
   ArrowRight, 
-  Clock, 
   Check, 
   X, 
   AlertTriangle, 
   Database,
   UploadCloud,
-  Sparkles,
-  Trash2
+  Sparkles
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
@@ -749,64 +748,15 @@ export default function App() {
           />
         ) : (
           <div className="reels-grid">
-            {filteredReels.map((reel) => {
-              const details = reel.extracted_json || {};
-              if (reel.status && reel.status !== 'done') {
-                return (
-                  <article key={reel.id} className="glass reel-card" style={{ opacity: 0.7 }}>
-                    <div className="card-header">
-                      <span className="card-topic-badge">
-                        {reel.status === 'processing' ? 'Processing…' : reel.status === 'failed' ? 'Failed' : 'Queued'}
-                      </span>
-                      <button className="delete-btn" title="Delete reel" onClick={(e) => handleDelete(reel.id, e)}>
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                    <h3 className="card-title">{reel.title || 'Queued reel'}</h3>
-                    {reel.url && (
-                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{reel.url}</p>
-                    )}
-                  </article>
-                );
-              }
-              return (
-                <article
-                  key={reel.id}
-                  className="glass glass-interactive reel-card"
-                  onClick={() => {
-                    setSelectedReel(reel);
-                    setIsTranscriptOpen(false);
-                    setIsCaptionOpen(false);
-                  }}
-                >
-                  <div className="card-header">
-                    <span className="card-topic-badge">{details.core_topic || 'Reel Extract'}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <span className="card-date">{formatDate(reel.created_at)}</span>
-                      <button
-                        className="delete-btn"
-                        title="Delete reel"
-                        onClick={(e) => handleDelete(reel.id, e)}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  </div>
-                  <h3 className="card-title">{reel.title || 'Untitled Extraction'}</h3>
-                  <p className="card-takeaway">{details.key_takeaway}</p>
-                  
-                  <div className="card-footer">
-                    <div className="stat-item">
-                      <Clock size={14} />
-                      <span>{details.action_items?.length || 0} tasks</span>
-                    </div>
-                    <span className="read-more-link">
-                      View details <ArrowRight size={14} />
-                    </span>
-                  </div>
-                </article>
-              );
-            })}
+            {filteredReels.map((reel) => (
+              <ReelCard
+                key={reel.id}
+                reel={reel}
+                onSelect={(r) => { setSelectedReel(r); setIsTranscriptOpen(false); setIsCaptionOpen(false); }}
+                formatDate={formatDate}
+                handleDelete={handleDelete}
+              />
+            ))}
           </div>
         )}
       </section>
