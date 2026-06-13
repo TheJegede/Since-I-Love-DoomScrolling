@@ -6,6 +6,7 @@ import threading
 import tempfile
 import logging
 from datetime import datetime, timezone
+from contextlib import asynccontextmanager
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -63,10 +64,20 @@ groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 # Initialize main database
 init_local_db()
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if os.getenv("ENABLE_WORKER", "1") == "0":
+        logger.info("ENABLE_WORKER=0 — queue worker disabled.")
+    else:
+        threading.Thread(target=_worker_loop, daemon=True).start()
+    yield
+
+
 app = FastAPI(
     title="Instagram Reels Information Extractor API",
     description="Backend service to scrape, transcribe, and extract structured data from Reels",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS middleware configuration
@@ -626,13 +637,6 @@ def _worker_loop(poll_interval: float = 5.0, idle_interval: float = 20.0) -> Non
             did_work = False
         time.sleep(poll_interval if did_work else idle_interval)
 
-
-@app.on_event("startup")
-def _start_worker():
-    if os.getenv("ENABLE_WORKER", "1") == "0":
-        logger.info("ENABLE_WORKER=0 — queue worker disabled.")
-        return
-    threading.Thread(target=_worker_loop, daemon=True).start()
 
 @app.post("/extract/file", response_model=ExtractionResponse)
 async def extract_file(
