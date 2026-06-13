@@ -101,6 +101,7 @@ export default function App() {
   const [fileTitle, setFileTitle] = useState('');
   const [fileCaption, setFileCaption] = useState('');
   const fileInputRef = useRef(null);
+  const anyPendingRef = useRef(false);
 
   // Bulk import (saved_posts.json)
   const batchInputRef = useRef(null);
@@ -192,13 +193,20 @@ export default function App() {
     checkBackendHealth();
   }, []);
 
-  // While any reel is queued/processing, poll so it fills in once the worker finishes.
+  // Keep a ref of whether any reel is still queued/processing, so the polling
+  // interval below can read the latest value without being torn down each change.
   useEffect(() => {
-    const anyPending = reels.some(r => r.status && r.status !== 'done' && r.status !== 'failed');
-    if (!anyPending) return;
-    const id = setInterval(fetchReels, 5000);
-    return () => clearInterval(id);
+    anyPendingRef.current = reels.some(r => r.status && r.status !== 'done' && r.status !== 'failed');
   }, [reels]);
+
+  // While any reel is queued/processing, poll so it fills in once the worker finishes.
+  // A single stable interval reads the latest pending state from a ref each tick.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (anyPendingRef.current) fetchReels();
+    }, 5000);
+    return () => clearInterval(id);
+  }, []);
 
   const handleRecompute = async () => {
     setIsRecomputing(true);
