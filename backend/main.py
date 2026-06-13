@@ -140,6 +140,12 @@ CLUSTER_CHUNK_SIZE = 50
 CLUSTER_CHUNK_DELAY = 30  # seconds between Groq calls, to respect 6000 TPM cap
 
 
+def _chunked(seq: list, size: int):
+    """Yield successive `size`-length slices of `seq`."""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
 def _cluster_one_chunk(chunk: List[dict], existing_clusters: List[str]) -> List[dict]:
     """Cluster one batch of {"id", "topic"} items via a single Llama call.
 
@@ -732,8 +738,7 @@ async def update_batch_job_status():
     
     # Fetch all statuses in chunks of 100 to avoid query limit bounds
     db_rows = []
-    for i in range(0, len(urls), 100):
-        chunk = urls[i:i+100]
+    for chunk in _chunked(urls, 100):
         try:
             res = client.table(db.TABLE).select("url", "status", "error").in_("url", chunk).execute()
             db_rows.extend(res.data or [])
@@ -803,8 +808,7 @@ async def extract_batch(file: UploadFile = File(...)):
     
     # Check existing in chunks of 100
     existing_urls = set()
-    for i in range(0, len(urls), 100):
-        chunk = urls[i:i+100]
+    for chunk in _chunked(urls, 100):
         res = client.table(db.TABLE).select("url").in_("url", chunk).execute()
         for row in (res.data or []):
             existing_urls.add(row["url"])
@@ -829,8 +833,8 @@ async def extract_batch(file: UploadFile = File(...)):
         ]
         
         # Insert in chunks of 50
-        for i in range(0, len(rows_to_insert), 50):
-            client.table(db.TABLE).insert(rows_to_insert[i:i+50]).execute()
+        for chunk in _chunked(rows_to_insert, 50):
+            client.table(db.TABLE).insert(chunk).execute()
         enqueued_count = len(rows_to_insert)
 
     # Initialize batch tracking state
@@ -872,8 +876,7 @@ async def get_reels_status(payload: dict):
         
     client = db.get_client()
     db_rows = []
-    for i in range(0, len(urls), 100):
-        chunk = urls[i:i+100]
+    for chunk in _chunked(urls, 100):
         res = client.table(db.TABLE).select("url", "status", "error").in_("url", chunk).execute()
         db_rows.extend(res.data or [])
         

@@ -354,6 +354,15 @@ def test_reels_include_cluster():
         main.db.list_reels = orig
 
 
+def test_chunked_helper():
+    print("Testing _chunked splits sequences into fixed-size lists...")
+    from main import _chunked
+    assert list(_chunked([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
+    assert list(_chunked([], 3)) == []
+    assert list(_chunked([1, 2], 5)) == [[1, 2]]
+    print("[OK] _chunked helper passed!")
+
+
 def test_parse_saved_posts():
     print("Testing parse_saved_posts filters reels...")
     from saved_parser import parse_saved_posts
@@ -528,6 +537,7 @@ if __name__ == "__main__":
     test_delete_reel()
     test_list_clusters()
     test_reels_include_cluster()
+    test_chunked_helper()
     test_parse_saved_posts()
     test_batch_status_initial()
     test_batch_guard_409()
