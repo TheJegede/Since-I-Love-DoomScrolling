@@ -14,14 +14,13 @@ parent_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(_
 if os.path.exists(parent_env_path):
     load_dotenv(parent_env_path)
 
-import db
 from main import worker_tick
 
 if __name__ == "__main__":
     logger.info("Standalone reels queue worker started locally.")
     if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_KEY"):
         logger.error("SUPABASE_URL / SUPABASE_SERVICE_KEY env vars not set. Exiting.")
-        exit(1)
+        sys.exit(1)
         
     drain_mode = "--drain" in sys.argv
     if drain_mode:
