@@ -22,16 +22,16 @@
 
 ---
 
-## 🟢 HANDOFF STATUS — resume at Task C4 (updated 2026-06-12)
+## 🟢 STATUS — COMPLETED (updated 2026-06-12)
 
-**Done and committed:** Phase A (A1–A8), Phase B (B1–B2), Phase C tasks C1, C2, C3.
-**Remaining:** C4, C5, C6, C7, C8, C9. Start at **C4**.
+**Done and committed:** All Phases (Phase A, Phase B, and Phase C tasks C1 to C9).
+**Remaining:** None.
 
 ### Working state
-- **Branch:** `refactor/review-code-fixes` (off `main`). All work committed here, one commit per task. Do NOT work on `main`.
-- **Backend tests:** `backend/.venv/Scripts/python.exe verify_pipeline.py` → must end `--- All tests completed successfully! ---`. Currently green.
-- **Frontend (run from `frontend/`):** `npm test` → 2 files, 4 tests passing. `npm run lint` → clean. `npm run build` → builds. Deps already installed (Vitest + RTL).
-- **`frontend/src/App.jsx` is currently 963 lines.** Goal after C4–C8: well under 600.
+- **Branch:** `refactor/review-code-fixes` (off `main`).
+- **Backend tests:** fully green.
+- **Frontend tests:** 15/15 tests passing, lint clean, production build compiles successfully.
+- **`frontend/src/App.jsx` line count:** 596 lines (down from 1,047 lines). All subcomponents extracted and fully verified.
 
 ### Commit log so far (newest first)
 ```
