@@ -8,12 +8,14 @@ import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 import yt_dlp
 from groq import Groq
 from dotenv import load_dotenv
+import re
+import glob
 
 # Load local environment variables if present (for local dev)
 load_dotenv()
@@ -46,6 +48,14 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # Validate configuration
 if not GROQ_API_KEY:
     logger.warning("GROQ_API_KEY environment variable is not set.")
+
+API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")
+
+def verify_api_key(x_api_key: Optional[str] = Header(None)):
+    """Access gate: enforce token check if API_AUTH_TOKEN environment variable is set."""
+    if API_AUTH_TOKEN:
+        if not x_api_key or x_api_key.strip() != API_AUTH_TOKEN.strip():
+            raise HTTPException(status_code=401, detail="Unauthorized API access. Valid X-API-Key header required.")
 
 # Initialize data layer
 import db
@@ -290,6 +300,13 @@ def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
     ]
 
 # Helper functions
+def is_valid_instagram_reel(url: str) -> bool:
+    if not url:
+        return False
+    # Strict regex pattern matching Instagram Reel paths
+    pattern = r"^https?://(www\.)?instagram\.com/reel/[A-Za-z0-9_\-]+/?.*$"
+    return bool(re.match(pattern, url.strip()))
+
 def get_cookie_file() -> Optional[str]:
     """Check for cookies.txt in common paths to bypass Instagram scraping blocks."""
     paths = [
@@ -309,9 +326,13 @@ def download_and_extract_audio(url: str) -> tuple[str, str, str]:
     temp_dir = tempfile.gettempdir()
     cookie_file = get_cookie_file()
 
+    # Extract Reel ID from the URL (fallback to UUID if match fails)
+    match = re.search(r"/reel/([A-Za-z0-9_\-]+)", url)
+    reel_id = match.group(1) if match else str(uuid.uuid4())
+
     ydl_opts = {
         'format': 'bestaudio/best',
-        'outtmpl': os.path.join(temp_dir, 'video_%(id)s.%(ext)s'),
+        'outtmpl': os.path.join(temp_dir, f'video_{reel_id}.%(ext)s'),
         'postprocessors': [{
             'key': 'FFmpegExtractAudio',
             'preferredcodec': 'mp3',
@@ -343,6 +364,13 @@ def download_and_extract_audio(url: str) -> tuple[str, str, str]:
             return mp3_path, post_caption, title
     except Exception as e:
         logger.error(f"Error downloading or extracting audio: {str(e)}")
+        # Clean up any leftover temp files on download error
+        for f in glob.glob(os.path.join(temp_dir, f"video_{reel_id}.*")):
+            try:
+                os.remove(f)
+                logger.info(f"Cleaned up failed download file: {f}")
+            except Exception as ce:
+                logger.warning(f"Could not delete temp file {f}: {str(ce)}")
         raise HTTPException(
             status_code=500,
             detail=f"Failed to download or parse Instagram Reel. Meta may be blocking the request. Error: {str(e)}"
@@ -478,7 +506,7 @@ def list_reels(
         logger.error(f"Error fetching reels: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch reels: {str(e)}")
 
-@app.delete("/reels/{reel_id}")
+@app.delete("/reels/{reel_id}", dependencies=[Depends(verify_api_key)])
 def delete_reel(reel_id: str):
     """Delete a single saved reel by id. 404 if it does not exist."""
     try:
@@ -491,13 +519,47 @@ def delete_reel(reel_id: str):
         logger.error(f"Delete failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
-@app.post("/clusters/recompute")
-def recompute_clusters():
-    """Regroup all saved reels into emergent topic clusters via one LLM call."""
+
+@app.get("/reels/{reel_id}/details")
+def get_reel_details(reel_id: str):
+    """Retrieve full details (transcript and caption) for a specific reel."""
+    try:
+        details = db.get_reel_details(reel_id)
+        if not details:
+            raise HTTPException(status_code=404, detail="Reel not found.")
+        return details
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching reel details: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch details: {str(e)}")
+
+CLUSTER_JOB = {
+    "status": "idle",  # idle | running | done | error
+    "started_at": None,
+    "finished_at": None,
+    "assigned": 0,
+    "error": None,
+}
+
+
+def run_cluster_recompute_task():
+    global CLUSTER_JOB
+    CLUSTER_JOB.update({
+        "status": "running",
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "finished_at": None,
+        "assigned": 0,
+        "error": None,
+    })
     try:
         rows = db.reels_for_clustering()
         if not rows:
-            return {"clusters": [], "assigned": 0}
+            CLUSTER_JOB.update({
+                "status": "done",
+                "finished_at": datetime.now(timezone.utc).isoformat(),
+            })
+            return
 
         items = []
         for r in rows:
@@ -518,12 +580,34 @@ def recompute_clusters():
                 applied += 1
 
         logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
-        return {"clusters": db.cluster_counts(), "assigned": applied}
-    except HTTPException:
-        raise
+        CLUSTER_JOB.update({
+            "status": "done",
+            "assigned": applied,
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        })
     except Exception as e:
-        logger.error(f"Cluster recompute failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Cluster recompute failed: {str(e)}")
+        logger.error(f"Cluster recompute task failed: {str(e)}")
+        CLUSTER_JOB.update({
+            "status": "error",
+            "error": str(e),
+            "finished_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+
+@app.post("/clusters/recompute", dependencies=[Depends(verify_api_key)])
+def recompute_clusters(background_tasks: BackgroundTasks):
+    """Trigger cluster recomputation in the background."""
+    if CLUSTER_JOB["status"] == "running":
+        raise HTTPException(status_code=409, detail="Cluster recomputation is already in progress.")
+        
+    background_tasks.add_task(run_cluster_recompute_task)
+    return {"status": "started", "message": "Cluster recomputation started in the background."}
+
+
+@app.get("/clusters/recompute/status")
+def get_recompute_status():
+    """Poll endpoint to check recomputation status."""
+    return CLUSTER_JOB
 
 @app.get("/clusters")
 def list_clusters():
@@ -582,12 +666,14 @@ def process_reel_url(url: str) -> dict:
     )
 
 
-@app.post("/extract/url", response_model=ExtractionResponse)
+@app.post("/extract/url", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
 async def extract_url(payload: dict):
     """Accepts an Instagram Reel URL and runs the full extraction pipeline."""
     url = payload.get("url")
     if not url:
         raise HTTPException(status_code=400, detail="Missing required 'url' parameter.")
+    if not is_valid_instagram_reel(url):
+        raise HTTPException(status_code=400, detail="Invalid Instagram Reel URL format.")
     return process_reel_url(url)
 
 
@@ -599,6 +685,10 @@ def process_pending_reel(row: dict) -> None:
     can be retried later by resetting its status to 'pending'."""
     reel_id = row["id"]
     url = row["url"]
+    if not is_valid_instagram_reel(url):
+        logger.warning(f"Worker rejected reel {reel_id}: Invalid URL format ({url})")
+        db.mark_failed(reel_id, f"Invalid Instagram Reel URL format: {url}")
+        return
     try:
         title, raw_transcript, post_caption, extracted = _run_pipeline(url)
         db.update_reel_result(
@@ -638,7 +728,7 @@ def _worker_loop(poll_interval: float = 5.0, idle_interval: float = 20.0) -> Non
         time.sleep(poll_interval if did_work else idle_interval)
 
 
-@app.post("/extract/file", response_model=ExtractionResponse)
+@app.post("/extract/file", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
 async def extract_file(
     file: UploadFile = File(...),
     title: str = Form("Uploaded Audio File"),
@@ -685,7 +775,7 @@ async def extract_file(
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
 
-@app.post("/extract/text", response_model=ExtractionResponse)
+@app.post("/extract/text", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
 async def extract_text(payload: dict):
     """
     Accepts raw transcript text and/or captions directly to skip scraping/transcribing
@@ -784,7 +874,7 @@ async def update_batch_job_status():
         BATCH_JOB["finished_at"] = datetime.now(timezone.utc).isoformat()
 
 
-@app.post("/extract/batch")
+@app.post("/extract/batch", dependencies=[Depends(verify_api_key)])
 async def extract_batch(file: UploadFile = File(...)):
     """Accept an uploaded saved_posts.json and enqueue reels in Supabase."""
     if BATCH_JOB["status"] == "running":

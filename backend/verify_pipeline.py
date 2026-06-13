@@ -104,7 +104,13 @@ def test_recompute_clusters_mock():
     try:
         r = client.post("/clusters/recompute")
         assert r.status_code == 200, r.text
-        assert r.json()["assigned"] == 2, r.text
+        assert r.json()["status"] == "started", r.text
+        
+        status_resp = client.get("/clusters/recompute/status")
+        assert status_resp.status_code == 200
+        job = status_resp.json()
+        assert job["status"] == "done", job
+        assert job["assigned"] == 2, job
         assert ("a", "Productivity") in applied
         print("[OK] recompute clusters passed!")
     finally:
@@ -333,6 +339,23 @@ def test_delete_reel():
         main.db.delete_reel = orig
 
 
+def test_get_reel_details():
+    print("Testing GET /reels/{id}/details (db mocked)...")
+    import main
+    orig = main.db.get_reel_details
+    main.db.get_reel_details = lambda rid: {"raw_transcript": "t", "post_caption": "c"} if rid == "abc" else None
+    try:
+        r = client.get("/reels/abc/details")
+        assert r.status_code == 200, r.text
+        assert r.json()["raw_transcript"] == "t"
+        assert r.json()["post_caption"] == "c"
+        
+        assert client.get("/reels/missing/details").status_code == 404
+        print("[OK] get reel details passed!")
+    finally:
+        main.db.get_reel_details = orig
+
+
 def test_list_clusters():
     print("Testing GET /clusters (db mocked)...")
     import main
@@ -544,6 +567,138 @@ def test_reels_status_endpoint():
         main.db.get_client = orig_client
 
 
+def test_url_validation_helper():
+    print("Testing is_valid_instagram_reel helper...")
+    from main import is_valid_instagram_reel
+    assert is_valid_instagram_reel("https://www.instagram.com/reel/C7xY9/") is True
+    assert is_valid_instagram_reel("http://instagram.com/reel/abc-123_XYZ/?query=1") is True
+    assert is_valid_instagram_reel("https://google.com") is False
+    assert is_valid_instagram_reel("https://instagram.com/p/abc/") is False
+    assert is_valid_instagram_reel("invalid-url") is False
+    assert is_valid_instagram_reel("") is False
+    print("[OK] URL validation helper passed!")
+
+def test_extract_url_validation_error():
+    print("Testing POST /extract/url blocks invalid URLs...")
+    response = client.post("/extract/url", json={"url": "https://google.com"})
+    assert response.status_code == 400
+    assert "Invalid Instagram Reel URL" in response.json()["detail"]
+    print("[OK] extract_url validation error passed!")
+
+def test_worker_tick_invalid_url():
+    print("Testing worker_tick marks invalid URLs as failed...")
+    import main
+    captured = {}
+    orig = (main.db.claim_next_pending, main.db.mark_failed)
+    main.db.claim_next_pending = lambda: {"id": "row_invalid", "url": "https://malicious-ssrf.com"}
+    main.db.mark_failed = lambda reel_id, error: captured.update({"id": reel_id, "error": str(error)})
+    try:
+        did = main.worker_tick()
+        assert did is True
+        assert captured["id"] == "row_invalid"
+        assert "Invalid Instagram Reel URL" in captured["error"]
+        print("[OK] worker_tick invalid URL failure passed!")
+    finally:
+        main.db.claim_next_pending, main.db.mark_failed = orig
+
+
+def test_download_cleanup_on_failure():
+    print("Testing download_and_extract_audio cleans up files on failure...")
+    import tempfile
+    import os
+    import main
+    
+    # Create fake files in temp dir
+    temp_dir = tempfile.gettempdir()
+    reel_id = "test_cleanup_fail_123"
+    url = f"https://www.instagram.com/reel/{reel_id}/"
+    
+    fake_mp4 = os.path.join(temp_dir, f"video_{reel_id}.mp4")
+    fake_part = os.path.join(temp_dir, f"video_{reel_id}.part")
+    
+    # Write empty files
+    with open(fake_mp4, "w") as f:
+        f.write("mp4")
+    with open(fake_part, "w") as f:
+        f.write("part")
+        
+    assert os.path.exists(fake_mp4) is True
+    assert os.path.exists(fake_part) is True
+    
+    # Mock YoutubeDL to throw an Exception
+    class FakeYDLThrow:
+        def __init__(self, *args, **kwargs):
+            pass
+        def __enter__(self):
+            return self
+        def __exit__(self, exc_type, exc_val, exc_tb):
+            pass
+        def extract_info(self, *args, **kwargs):
+            raise Exception("Mock download error")
+            
+    orig_ydl = main.yt_dlp.YoutubeDL
+    main.yt_dlp.YoutubeDL = FakeYDLThrow
+    
+    try:
+        from fastapi import HTTPException
+        try:
+            main.download_and_extract_audio(url)
+            assert False, "Should have raised HTTPException"
+        except HTTPException as he:
+            assert he.status_code == 500
+            assert "Mock download error" in he.detail
+            
+        # Check that the files were deleted
+        assert os.path.exists(fake_mp4) is False, f"fake_mp4 still exists at {fake_mp4}"
+        assert os.path.exists(fake_part) is False, f"fake_part still exists at {fake_part}"
+        print("[OK] download_and_extract_audio failure cleanup passed!")
+    finally:
+        main.yt_dlp.YoutubeDL = orig_ydl
+        # Clean up files in case they were not deleted to avoid side effects
+        if os.path.exists(fake_mp4):
+            os.remove(fake_mp4)
+        if os.path.exists(fake_part):
+            os.remove(fake_part)
+
+
+def test_api_auth_token_check():
+    print("Testing API Access Gate authentication check (API_AUTH_TOKEN set)...")
+    import main
+    orig_token = main.API_AUTH_TOKEN
+    main.API_AUTH_TOKEN = "super_secret_test_key"
+    try:
+        # Request without header -> 401
+        res = client.post("/extract/text", json={"title": "Test", "transcript": "a", "caption": "b"})
+        assert res.status_code == 401, res.text
+        assert "Unauthorized" in res.json()["detail"]
+
+        # Request with incorrect header -> 401
+        res = client.post("/extract/text", json={"title": "Test", "transcript": "a", "caption": "b"}, headers={"X-API-Key": "wrong"})
+        assert res.status_code == 401, res.text
+
+        # Request with correct header -> mock output to pass
+        mock_extracted = ReelExtraction(
+            core_topic="Topic", key_takeaway="Takeaway", action_items=["a"], tools_or_resources=["b"]
+        )
+        orig_extract = main.extract_structured_json
+        main.extract_structured_json = lambda t, c: mock_extracted
+        orig_save = main.save_to_database
+        main.save_to_database = lambda url, title, raw_transcript, post_caption, extracted: {
+            "id": "1", "title": title, "extracted_json": extracted.model_dump(), "created_at": "2026-06-06T00:00:00Z"
+        }
+        try:
+            res = client.post("/extract/text", json={"title": "Test", "transcript": "a", "caption": "b"}, headers={"X-API-Key": "super_secret_test_key"})
+            assert res.status_code == 200, res.text
+            assert res.json()["title"] == "Test"
+        finally:
+            main.extract_structured_json = orig_extract
+            main.save_to_database = orig_save
+
+        print("[OK] API Access Gate authentication check passed!")
+    finally:
+        main.API_AUTH_TOKEN = orig_token
+
+
 if __name__ == "__main__":
     print("--- Starting Transcriber Pipeline Test ---")
     test_health()
@@ -560,6 +715,7 @@ if __name__ == "__main__":
     test_worker_tick_empty()
     test_extract_url_regression()
     test_delete_reel()
+    test_get_reel_details()
     test_list_clusters()
     test_reels_include_cluster()
     test_cors_no_credentials()
@@ -569,7 +725,13 @@ if __name__ == "__main__":
     test_batch_guard_409()
     test_extract_batch_supabase()
     test_reels_status_endpoint()
+    test_url_validation_helper()
+    test_extract_url_validation_error()
+    test_worker_tick_invalid_url()
+    test_download_cleanup_on_failure()
+    test_api_auth_token_check()
     print("--- All tests completed successfully! ---")
     sys.exit(0)
+
 
 

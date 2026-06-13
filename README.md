@@ -174,8 +174,12 @@ CREATE TABLE IF NOT EXISTS saved_reels (
 -- Allow anonymous reads (dashboard)
 CREATE POLICY "anon select" ON saved_reels FOR SELECT TO anon USING (true);
 
--- Allow anonymous inserts (iPhone Shortcut via REST)
-CREATE POLICY "anon insert" ON saved_reels FOR INSERT TO anon WITH CHECK (true);
+-- Allow anonymous inserts (iPhone Shortcut via REST - restricted to pending reels only)
+CREATE POLICY "anon insert" ON saved_reels FOR INSERT TO anon 
+WITH CHECK (
+  status = 'pending' 
+  AND url LIKE 'https://%instagram.com/reel/%'
+);
 
 -- Enable RLS
 ALTER TABLE saved_reels ENABLE ROW LEVEL SECURITY;

@@ -23,3 +23,7 @@ frontend/dist/
 # Local database and progress JSON
 frontend/local_storage.db
 backend/batch_progress.json
+
+# Agent-specific
+.agents/
+skills-lock.json

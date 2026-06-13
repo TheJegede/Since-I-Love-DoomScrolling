@@ -21,6 +21,32 @@ import {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
 
+const fetchWithAuth = async (url, options = {}) => {
+  let key = import.meta.env.VITE_API_KEY || localStorage.getItem('transcriber_api_key') || '';
+  
+  if (key) {
+    options.headers = {
+      ...options.headers,
+      'X-API-Key': key
+    };
+  }
+  
+  let res = await fetch(url, options);
+  
+  if (res.status === 401) {
+    const promptKey = prompt("This action requires a valid API Authentication Key. Please enter it:");
+    if (promptKey) {
+      localStorage.setItem('transcriber_api_key', promptKey);
+      options.headers = {
+        ...options.headers,
+        'X-API-Key': promptKey
+      };
+      res = await fetch(url, options);
+    }
+  }
+  return res;
+};
+
 function computeClusters(reels) {
   const counts = {};
   for (const r of reels) {
@@ -111,7 +137,7 @@ export default function App() {
       if (supabase) {
         const { data, error } = await supabase
           .from('saved_reels')
-          .select('*')
+          .select('id, url, title, extracted_json, created_at, cluster, status')
           .order('created_at', { ascending: false })
           .limit(500);
         if (error) throw error;
@@ -160,24 +186,53 @@ export default function App() {
     setIsRecomputing(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE_URL}/clusters/recompute`, { method: 'POST' });
+      const res = await fetchWithAuth(`${API_BASE_URL}/clusters/recompute`, { method: 'POST' });
+      if (res.status === 409) {
+        // Already running, start polling
+        startRecomputePolling();
+        return;
+      }
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || 'Recompute failed.');
       }
-      await fetchReels();
+      
+      startRecomputePolling();
     } catch (err) {
       setError(err.message);
-    } finally {
       setIsRecomputing(false);
     }
+  };
+
+  const startRecomputePolling = () => {
+    const poll = async () => {
+      try {
+        const res = await fetchWithAuth(`${API_BASE_URL}/clusters/recompute/status`);
+        if (!res.ok) return;
+        const job = await res.json();
+        if (job.status !== 'running') {
+          clearInterval(intervalId);
+          setIsRecomputing(false);
+          if (job.status === 'error') {
+            setError(job.error || 'Recompute failed in background.');
+          } else {
+            await fetchReels();
+          }
+        }
+      } catch (err) {
+        console.error("Error polling cluster recompute status", err);
+      }
+    };
+
+    const intervalId = setInterval(poll, 3000);
+    poll(); // run immediately
   };
 
   const handleDelete = async (id, e) => {
     if (e) e.stopPropagation();
     if (!window.confirm('Delete this reel? This cannot be undone.')) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/reels/${id}`, { method: 'DELETE' });
+      const res = await fetchWithAuth(`${API_BASE_URL}/reels/${id}`, { method: 'DELETE' });
       if (!res.ok && res.status !== 404) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || 'Delete failed.');
@@ -186,6 +241,46 @@ export default function App() {
       if (selectedReel && selectedReel.id === id) setSelectedReel(null);
     } catch (err) {
       setError(err.message);
+    }
+  };
+
+  const handleSelectReel = async (reel) => {
+    // Set basic metadata first so the modal opens instantly
+    setSelectedReel(reel);
+    setIsTranscriptOpen(false);
+    setIsCaptionOpen(false);
+    
+    // If we already have the transcript cached locally, skip fetching
+    if (reel.raw_transcript !== undefined || reel.post_caption !== undefined) {
+      return;
+    }
+
+    try {
+      let details = null;
+      if (supabase) {
+        const { data, error } = await supabase
+          .from('saved_reels')
+          .select('raw_transcript, post_caption')
+          .eq('id', reel.id)
+          .single();
+        if (!error && data) {
+          details = data;
+        }
+      } else {
+        const res = await fetchWithAuth(`${API_BASE_URL}/reels/${reel.id}/details`);
+        if (res.ok) {
+          details = await res.json();
+        }
+      }
+      
+      if (details) {
+        const fullReel = { ...reel, ...details };
+        setSelectedReel(fullReel);
+        // Cache full details inside local state list
+        setReels(prev => prev.map(r => r.id === reel.id ? fullReel : r));
+      }
+    } catch (err) {
+      console.error("Failed to load reel details", err);
     }
   };
 
@@ -214,7 +309,7 @@ export default function App() {
     });
 
     try {
-      const response = await fetch(`${API_BASE_URL}/extract/url`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/extract/url`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ url: url.trim() })
@@ -272,7 +367,7 @@ export default function App() {
 
     try {
       setCurrentStep(4); // Transcribe
-      const response = await fetch(`${API_BASE_URL}/extract/file`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/extract/file`, {
         method: 'POST',
         body: formData
       });
@@ -310,7 +405,7 @@ export default function App() {
     setCurrentStep(5); // Jump straight to LLM extraction
 
     try {
-      const response = await fetch(`${API_BASE_URL}/extract/text`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/extract/text`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -346,7 +441,7 @@ export default function App() {
 
   const pollBatchStatus = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/extract/batch/status`);
+      const res = await fetchWithAuth(`${API_BASE_URL}/extract/batch/status`);
       if (!res.ok) return;
       const job = await res.json();
       setBatchJob(job);
@@ -367,7 +462,7 @@ export default function App() {
     const formData = new FormData();
     formData.append('file', batchFile);
     try {
-      const res = await fetch(`${API_BASE_URL}/extract/batch`, { method: 'POST', body: formData });
+      const res = await fetchWithAuth(`${API_BASE_URL}/extract/batch`, { method: 'POST', body: formData });
       if (res.status === 409) {
         // a job is already running — attach to it
         setIsBatchRunning(true);
@@ -555,7 +650,7 @@ export default function App() {
         ) : viewMode === 'table' ? (
           <InsightsTable
             reels={filteredReels}
-            onSelect={(reel) => { setSelectedReel(reel); setIsTranscriptOpen(false); setIsCaptionOpen(false); }}
+            onSelect={handleSelectReel}
             formatDate={formatDate}
             handleDelete={handleDelete}
           />
@@ -565,7 +660,7 @@ export default function App() {
               <ReelCard
                 key={reel.id}
                 reel={reel}
-                onSelect={(r) => { setSelectedReel(r); setIsTranscriptOpen(false); setIsCaptionOpen(false); }}
+                onSelect={handleSelectReel}
                 formatDate={formatDate}
                 handleDelete={handleDelete}
               />

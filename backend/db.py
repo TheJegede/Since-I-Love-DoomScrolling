@@ -46,6 +46,7 @@ def row_to_record(r: dict) -> dict:
         "extracted_json": ej,
         "created_at": r.get("created_at"),
         "cluster": r.get("cluster") or "Unclustered",
+        "status": r.get("status") or "done",
     }
 
 
@@ -73,13 +74,20 @@ def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
 
 
 def list_reels(limit: int = 20, search: Optional[str] = None) -> list:
-    q = get_client().table(TABLE).select("*").order("created_at", desc=True).limit(limit)
+    q = get_client().table(TABLE).select("id, url, title, extracted_json, created_at, cluster, status").order("created_at", desc=True).limit(limit)
     if search:
         # UI filters in-memory; this server search is a coarse fallback over text cols.
         like = f"%{search}%"
         q = q.or_(f"title.ilike.{like},raw_transcript.ilike.{like},post_caption.ilike.{like}")
     res = q.execute()
     return [row_to_record(r) for r in (res.data or [])]
+
+
+def get_reel_details(reel_id: str) -> Optional[dict]:
+    """Retrieve only raw_transcript and post_caption fields for a reel."""
+    res = get_client().table(TABLE).select("raw_transcript, post_caption").eq("id", reel_id).limit(1).execute()
+    rows = res.data or []
+    return rows[0] if rows else None
 
 
 def reels_for_clustering() -> list:
