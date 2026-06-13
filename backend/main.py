@@ -671,7 +671,7 @@ async def extract_file(
         # 3. Extract structured insights
         extracted_data = extract_structured_json(raw_transcript, caption or "")
 
-        # 3. Commit to Database
+        # 4. Commit to Database
         db_record = save_to_database(
             url=None, # No URL for manual upload
             title=title,
