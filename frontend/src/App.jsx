@@ -3,6 +3,7 @@ import './App.css';
 import { supabase, rowToRecord } from './supabaseClient';
 import { Skeleton, TableSkeleton } from './components/Skeletons';
 import ReelModal from './components/ReelModal';
+import InsightsTable from './components/InsightsTable';
 import {
   Clapperboard,
   Search,
@@ -740,40 +741,12 @@ export default function App() {
             <p>No extractions found. Input a Reel URL above to kickstart the autonomous pipeline!</p>
           </div>
         ) : viewMode === 'table' ? (
-          <div className="table-scroll">
-          <table className="insights-table glass">
-            <thead>
-              <tr>
-                <th>Topic</th><th>Cluster</th><th>Key takeaway</th><th>Tools</th><th>Saved</th><th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredReels.map(reel => {
-                const ej = reel.extracted_json || {};
-                return (
-                  <tr key={reel.id} onClick={() => { setSelectedReel(reel); setIsTranscriptOpen(false); setIsCaptionOpen(false); }}>
-                    <td>{ej.core_topic || reel.title}</td>
-                    <td><span className="cluster-pill">{reel.cluster || 'Unclustered'}</span></td>
-                    <td>{ej.key_takeaway}</td>
-                    <td>{(ej.tools_or_resources || []).map((t, i) => (
-                      <span className="tool-chip" key={i}>{t}</span>
-                    ))}</td>
-                    <td>{formatDate(reel.created_at) || '—'}</td>
-                    <td>
-                      <button
-                        className="delete-btn"
-                        title="Delete reel"
-                        onClick={(e) => handleDelete(reel.id, e)}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          </div>
+          <InsightsTable
+            reels={filteredReels}
+            onSelect={(reel) => { setSelectedReel(reel); setIsTranscriptOpen(false); setIsCaptionOpen(false); }}
+            formatDate={formatDate}
+            handleDelete={handleDelete}
+          />
         ) : (
           <div className="reels-grid">
             {filteredReels.map((reel) => {
