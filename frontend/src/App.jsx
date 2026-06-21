@@ -16,7 +16,9 @@ import {
   AlertTriangle, 
   Database,
   UploadCloud,
-  Sparkles
+  Sparkles,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
@@ -69,6 +71,8 @@ export default function App() {
   const [isWakingUp, setIsWakingUp] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 25;
   
   // File upload states
   const [file, setFile] = useState(null);
@@ -284,7 +288,10 @@ export default function App() {
     }
   };
 
-  const handleSearchChange = (e) => setSearchQuery(e.target.value);
+  const handleSearchChange = (e) => {
+    setSearchQuery(e.target.value);
+    setCurrentPage(1);
+  };
 
   const handleUrlSubmit = async (e) => {
     e.preventDefault();
@@ -536,6 +543,11 @@ export default function App() {
       return sortOrder === 'newest' ? db - da : da - db;
     });
 
+  const totalPages = Math.ceil(filteredReels.length / ITEMS_PER_PAGE) || 1;
+  const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
+  const endIndex = startIndex + ITEMS_PER_PAGE;
+  const paginatedReels = filteredReels.slice(startIndex, endIndex);
+
   return (
     <div className="app-container">
       {/* Header */}
@@ -609,19 +621,19 @@ export default function App() {
               <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>Table</button>
             </div>
 
-            <select value={clusterFilter} onChange={e => setClusterFilter(e.target.value)}>
+            <select value={clusterFilter} onChange={e => { setClusterFilter(e.target.value); setCurrentPage(1); }}>
               <option value="All">All clusters</option>
               {clusters.map(c => (
                 <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
               ))}
             </select>
 
-            <select value={toolFilter} onChange={e => setToolFilter(e.target.value)}>
+            <select value={toolFilter} onChange={e => { setToolFilter(e.target.value); setCurrentPage(1); }}>
               <option value="All">All tools</option>
               {allTools.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
 
-            <select value={sortOrder} onChange={e => setSortOrder(e.target.value)}>
+            <select value={sortOrder} onChange={e => { setSortOrder(e.target.value); setCurrentPage(1); }}>
               <option value="newest">Newest first</option>
               <option value="oldest">Oldest first</option>
             </select>
@@ -649,14 +661,14 @@ export default function App() {
           </div>
         ) : viewMode === 'table' ? (
           <InsightsTable
-            reels={filteredReels}
+            reels={paginatedReels}
             onSelect={handleSelectReel}
             formatDate={formatDate}
             handleDelete={handleDelete}
           />
         ) : (
           <div className="reels-grid">
-            {filteredReels.map((reel) => (
+            {paginatedReels.map((reel) => (
               <ReelCard
                 key={reel.id}
                 reel={reel}
@@ -665,6 +677,42 @@ export default function App() {
                 handleDelete={handleDelete}
               />
             ))}
+          </div>
+        )}
+
+        {/* Pagination Controls */}
+        {!isFetching && filteredReels.length > ITEMS_PER_PAGE && (
+          <div className="pagination-container glass">
+            <div className="pagination-info">
+              Showing <span className="highlight">{startIndex + 1}</span>–
+              <span className="highlight">{Math.min(endIndex, filteredReels.length)}</span> of{" "}
+              <span className="highlight">{filteredReels.length}</span> Reels
+            </div>
+            <div className="pagination-buttons">
+              <button
+                className="pagination-btn"
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                disabled={currentPage === 1}
+                aria-label="Previous page"
+              >
+                <ChevronLeft size={16} />
+                <span>Prev</span>
+              </button>
+              
+              <span className="page-indicator">
+                Page <span className="highlight">{currentPage}</span> of {totalPages}
+              </span>
+              
+              <button
+                className="pagination-btn"
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                disabled={currentPage === totalPages}
+                aria-label="Next page"
+              >
+                <span>Next</span>
+                <ChevronRight size={16} />
+              </button>
+            </div>
           </div>
         )}
       </section>
