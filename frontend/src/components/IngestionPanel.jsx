@@ -1,5 +1,5 @@
 import {
-  Clapperboard, UploadCloud, ArrowRight, Check,
+  Clapperboard, UploadCloud, Check,
 } from 'lucide-react';
 
 export default function IngestionPanel(props) {
@@ -17,7 +17,7 @@ export default function IngestionPanel(props) {
 
   return (
     <section className="glass ingestion-panel">
-      <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
         {ingestionTabs.map(({ key, label, Icon }) => (
           <button
             key={key}
@@ -27,9 +27,14 @@ export default function IngestionPanel(props) {
               borderBottom: mode === key ? '2px solid var(--accent-primary)' : 'none',
               paddingBottom: '0.5rem',
               color: mode === key ? 'var(--text-primary)' : 'var(--text-muted)',
+              fontWeight: 600,
+              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
             }}
           >
-            <Icon size={16} /> {label}
+            <Icon size={16} /> <span>{label.toUpperCase()}</span>
           </button>
         ))}
       </div>
@@ -48,10 +53,10 @@ export default function IngestionPanel(props) {
               disabled={isLoading}
             />
             <button type="submit" className="btn-primary" disabled={isLoading || !url.trim()}>
-              {isLoading ? "Processing..." : "Extract"}
-              <ArrowRight size={16} />
+              {isLoading ? "PROCESSING..." : "EXTRACT"}
             </button>
           </div>
+          <p className="input-hint">● Ready: Paste educational reel link to synthesize metrics</p>
         </form>
       )}
 
@@ -102,7 +107,7 @@ export default function IngestionPanel(props) {
                 onChange={(e) => setFileCaption(e.target.value)}
               />
               <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isLoading}>
-                {isLoading ? "Extracting..." : "Process Audio File"}
+                {isLoading ? "EXTRACTING..." : "PROCESS AUDIO FILE"}
               </button>
             </div>
           )}
@@ -133,7 +138,7 @@ export default function IngestionPanel(props) {
               onChange={(e) => setTextTranscript(e.target.value)}
             />
             <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isLoading}>
-              {isLoading ? "Running Groq Llama..." : "Extract Insights"}
+              {isLoading ? "RUNNING GROQ LLAMA..." : "EXTRACT INSIGHTS"}
             </button>
           </div>
         </form>
@@ -167,7 +172,7 @@ export default function IngestionPanel(props) {
           </div>
 
           <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start', marginTop: '1rem' }} disabled={isLoading || isBatchRunning || !batchFile}>
-            {isBatchRunning ? "Importing..." : "Start Bulk Import"}
+            {isBatchRunning ? "IMPORTING..." : "START BULK IMPORT"}
           </button>
 
           {batchJob && (

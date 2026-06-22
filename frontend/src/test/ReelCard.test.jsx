@@ -17,14 +17,14 @@ describe('ReelCard', () => {
     const onSelect = vi.fn();
     render(<ReelCard reel={doneReel} onSelect={onSelect} formatDate={() => 'Jun 6'} handleDelete={() => {}} />);
     expect(screen.getByText('Done Reel')).toBeInTheDocument();
-    expect(screen.getByText('2 tasks')).toBeInTheDocument();
+    expect(screen.getByText('0/2 Check')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Done Reel'));
     expect(onSelect).toHaveBeenCalledWith(doneReel);
   });
 
   it('renders a status placeholder for non-done reels', () => {
     render(<ReelCard reel={pendingReel} onSelect={() => {}} formatDate={() => ''} handleDelete={() => {}} />);
-    expect(screen.getByText('Processing…')).toBeInTheDocument();
+    expect(screen.getByText('PROCESSING →')).toBeInTheDocument();
     expect(screen.getByText('Queued Reel')).toBeInTheDocument();
   });
 });

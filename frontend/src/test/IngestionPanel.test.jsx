@@ -27,14 +27,14 @@ const baseProps = {
 describe('IngestionPanel', () => {
   it('renders all four mode tabs', () => {
     render(<IngestionPanel {...baseProps} />);
-    expect(screen.getByText('Reel URL')).toBeInTheDocument();
-    expect(screen.getByText('Bulk Import')).toBeInTheDocument();
+    expect(screen.getByText(/Reel URL/i)).toBeInTheDocument();
+    expect(screen.getByText(/Bulk Import/i)).toBeInTheDocument();
   });
 
   it('switches mode when a tab is clicked', () => {
     const setMode = vi.fn();
     render(<IngestionPanel {...baseProps} setMode={setMode} />);
-    fireEvent.click(screen.getByText('Audio File'));
+    fireEvent.click(screen.getByText(/Audio File/i));
     expect(setMode).toHaveBeenCalledWith('file');
   });
 

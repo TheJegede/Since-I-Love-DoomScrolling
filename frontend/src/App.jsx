@@ -18,7 +18,9 @@ import {
   UploadCloud,
   Sparkles,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Sun,
+  Moon
 } from 'lucide-react';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
@@ -73,6 +75,12 @@ export default function App() {
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const ITEMS_PER_PAGE = 25;
+  const [theme, setTheme] = useState(() => localStorage.getItem('transcriber_theme') || 'dark');
+
+  useEffect(() => {
+    document.documentElement.className = theme;
+    localStorage.setItem('transcriber_theme', theme);
+  }, [theme]);
   
   // File upload states
   const [file, setFile] = useState(null);
@@ -552,12 +560,27 @@ export default function App() {
     <div className="app-container">
       {/* Header */}
       <header className="app-header">
-        <div className="logo-container">
-          <Clapperboard className="logo-icon" size={36} />
-          <span className="logo-text">Transcriber</span>
+        <div className="header-top">
+          <div className="logo-container">
+            <Clapperboard className="logo-icon" size={32} />
+            <h1 className="logo-text">REEL TRANSCRIBER</h1>
+          </div>
+          <div className="header-meta">
+            <button 
+              className="theme-toggle-btn" 
+              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+              aria-label="Toggle theme"
+            >
+              {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+              <span>{theme === 'light' ? 'DARK MODE' : 'LIGHT MODE'}</span>
+            </button>
+            <span className="system-status">
+              STATUS: <span className="status-dot">●</span> LOCAL CORP V2.0
+            </span>
+          </div>
         </div>
         <p className="app-subtitle">
-          Extract structured key insights, tool lists, and checklist action items automatically from educational Instagram Reels.
+          Extract structured key insights, tool lists, and checklist action items automatically from educational Instagram Reels. Zero color gradient slop.
         </p>
       </header>
 
@@ -616,31 +639,43 @@ export default function App() {
 
         {reels.length > 0 && (
           <div className="controls-bar">
-            <div className="view-toggle">
-              <button className={viewMode === 'cards' ? 'active' : ''} onClick={() => setViewMode('cards')}>Cards</button>
-              <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>Table</button>
+            <div className="control-group">
+              <span className="control-label">CLUSTER TAG</span>
+              <select value={clusterFilter} onChange={e => { setClusterFilter(e.target.value); setCurrentPage(1); }}>
+                <option value="All">All clusters</option>
+                {clusters.map(c => (
+                  <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
+                ))}
+              </select>
             </div>
 
-            <select value={clusterFilter} onChange={e => { setClusterFilter(e.target.value); setCurrentPage(1); }}>
-              <option value="All">All clusters</option>
-              {clusters.map(c => (
-                <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
-              ))}
-            </select>
+            <div className="control-group">
+              <span className="control-label">TOOL FILTER</span>
+              <select value={toolFilter} onChange={e => { setToolFilter(e.target.value); setCurrentPage(1); }}>
+                <option value="All">All tools</option>
+                {allTools.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </div>
 
-            <select value={toolFilter} onChange={e => { setToolFilter(e.target.value); setCurrentPage(1); }}>
-              <option value="All">All tools</option>
-              {allTools.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <div className="control-group">
+              <span className="control-label">ORDER BY DATE</span>
+              <select value={sortOrder} onChange={e => { setSortOrder(e.target.value); setCurrentPage(1); }}>
+                <option value="newest">NEWEST FIRST</option>
+                <option value="oldest">OLDEST FIRST</option>
+              </select>
+            </div>
 
-            <select value={sortOrder} onChange={e => { setSortOrder(e.target.value); setCurrentPage(1); }}>
-              <option value="newest">Newest first</option>
-              <option value="oldest">Oldest first</option>
-            </select>
+            <div className="control-group">
+              <span className="control-label">VIEW LAYOUT</span>
+              <div className="view-toggle">
+                <button className={viewMode === 'cards' ? 'active' : ''} onClick={() => setViewMode('cards')}>CARDS</button>
+                <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>TABLE</button>
+              </div>
+            </div>
 
             {!isWakingUp && (
-              <button className="recompute-btn" onClick={handleRecompute} disabled={isRecomputing}>
-                {isRecomputing ? 'Clustering…' : 'Recompute clusters'}
+              <button className="recompute-btn" style={{ alignSelf: 'flex-end', marginBottom: '1px' }} onClick={handleRecompute} disabled={isRecomputing}>
+                {isRecomputing ? 'CLUSTERING…' : 'RECOMPUTE CLUSTERS'}
               </button>
             )}
           </div>
@@ -675,6 +710,7 @@ export default function App() {
                 onSelect={handleSelectReel}
                 formatDate={formatDate}
                 handleDelete={handleDelete}
+                checkedActions={checkedActions}
               />
             ))}
           </div>

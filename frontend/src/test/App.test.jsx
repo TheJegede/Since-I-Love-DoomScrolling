@@ -23,16 +23,16 @@ beforeEach(() => {
 describe('App baseline', () => {
   it('renders the header', async () => {
     render(<App />);
-    expect(screen.getByText('Transcriber')).toBeInTheDocument();
+    expect(screen.getByText(/Transcriber/i)).toBeInTheDocument();
     await screen.findByText(/No extractions found/i);
   });
 
   it('renders the four ingestion mode tabs', async () => {
     render(<App />);
-    expect(screen.getByText('Reel URL')).toBeInTheDocument();
-    expect(screen.getByText('Audio File')).toBeInTheDocument();
-    expect(screen.getByText('Transcript Text')).toBeInTheDocument();
-    expect(screen.getByText('Bulk Import')).toBeInTheDocument();
+    expect(screen.getByText(/Reel URL/i)).toBeInTheDocument();
+    expect(screen.getByText(/Audio File/i)).toBeInTheDocument();
+    expect(screen.getByText(/Transcript Text/i)).toBeInTheDocument();
+    expect(screen.getByText(/Bulk Import/i)).toBeInTheDocument();
     await screen.findByText(/No extractions found/i);
   });
 

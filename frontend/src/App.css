@@ -1,9 +1,86 @@
 /* Tabular insights view + clustering controls.
    All values pull from the design tokens in index.css (dark aurora-glass system). */
 
+/* Header top layout */
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 0.8rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.header-meta {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+}
+
+.theme-toggle-btn {
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.85rem;
+  font-family: var(--font-family);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.theme-toggle-btn:hover {
+  background: var(--accent-primary);
+  color: var(--bg-dark);
+}
+
+.system-status {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  color: var(--accent-success);
+  margin: 0 0.15rem;
+}
+
+/* Ingestion panel input hint */
+.input-hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-top: 0.55rem;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+/* Controls groups with top labels */
+.control-group {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.control-label {
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+}
+
 .controls-bar {
   display: flex;
-  gap: 0.75rem;
+  gap: 1.25rem;
   align-items: center;
   flex-wrap: wrap;
   margin: 0 0 1.75rem;
@@ -16,7 +93,8 @@
 }
 
 @media (max-width: 640px) {
-  .controls-bar { gap: 0.6rem; }
+  .controls-bar { gap: 0.8rem; }
+  .control-group,
   .controls-bar select,
   .recompute-btn,
   .view-toggle { width: 100%; }
@@ -277,3 +355,57 @@
   }
 }
 
+
+.card-header {
+  align-items: center !important;
+}
+
+.card-topic-badge {
+  display: inline-block;
+  background: transparent !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--glass-border) !important;
+  padding: 0.2rem 0.55rem !important;
+  font-size: 0.7rem !important;
+  font-weight: 800 !important;
+  border-radius: var(--radius-sm) !important;
+  margin-bottom: 0 !important;
+  text-transform: uppercase;
+}
+
+.card-tool-badge {
+  display: inline-block;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--glass-border);
+  padding: 0.2rem 0.55rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  border-radius: var(--radius-sm);
+  text-transform: uppercase;
+}
+
+/* Hover contrast fixes for primary actions and selectors */
+.btn-primary:hover:not(:disabled),
+.recompute-btn:hover:not(:disabled) {
+  background: var(--accent-secondary) !important;
+  color: var(--text-primary) !important;
+  border-color: var(--glass-border) !important;
+}
+
+/* Modal specific contrast and style overrides */
+.takeaway-banner {
+  border-left: 2px solid var(--glass-border) !important;
+}
+.action-item {
+  border: 1px solid var(--glass-border) !important;
+}
+.tool-tag {
+  border: 1px solid var(--glass-border) !important;
+}
+.transcript-accordion {
+  border: 1px solid var(--glass-border) !important;
+}
+.accordion-content {
+  border-top: 1px solid var(--glass-border) !important;
+}

@@ -26,7 +26,7 @@ export default function ReelModal({
 
         <div className="modal-header-meta">
           <span className="card-topic-badge" style={{ fontSize: '0.8rem', padding: '0.35rem 0.85rem' }}>
-            {details.core_topic}
+            {(details.core_topic || 'REEL').toUpperCase()}
           </span>
           <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
             Processed on {formatDate(reel.created_at)}

@@ -1,50 +1,65 @@
-import { Trash2, Clock, ArrowRight } from 'lucide-react';
+import { Trash2 } from 'lucide-react';
 
-export default function ReelCard({ reel, onSelect, formatDate, handleDelete }) {
+export default function ReelCard({ reel, onSelect, formatDate, handleDelete, checkedActions = {} }) {
   const details = reel.extracted_json || {};
+  
+  // Topic fallback
+  const topic = details.core_topic || (reel.status && reel.status !== 'done' ? reel.status : 'REEL');
+  
+  // First tool badge
+  const mainTool = details.tools_or_resources?.[0] || '';
+  
+  // Checklist calculations
+  const totalActions = details.action_items?.length || 0;
+  const completedActions = details.action_items?.filter(
+    (_, i) => checkedActions[`${reel.id}-${i}`]
+  ).length || 0;
 
-  if (reel.status && reel.status !== 'done') {
-    return (
-      <article className="glass reel-card" style={{ opacity: 0.7 }}>
-        <div className="card-header">
-          <span className="card-topic-badge">
-            {reel.status === 'processing' ? 'Processing…' : reel.status === 'failed' ? 'Failed' : 'Queued'}
-          </span>
-          <button className="delete-btn" title="Delete reel" onClick={(e) => handleDelete(reel.id, e)}>
-            <Trash2 size={15} />
-          </button>
-        </div>
-        <h3 className="card-title">{reel.title || 'Queued reel'}</h3>
-        {reel.url && (
-          <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>{reel.url}</p>
-        )}
-      </article>
-    );
+  // Status footer labels
+  let statusText = 'INSPECT INDEX →';
+  if (reel.status === 'processing') {
+    statusText = 'PROCESSING →';
+  } else if (reel.status === 'failed') {
+    statusText = 'FAILED →';
+  } else if (reel.status === 'pending') {
+    statusText = 'QUEUED →';
   }
 
   return (
-    <article className="glass glass-interactive reel-card" onClick={() => onSelect(reel)}>
+    <article 
+      className="glass glass-interactive reel-card" 
+      onClick={() => onSelect(reel)}
+      style={{ opacity: reel.status && reel.status !== 'done' ? 0.8 : 1 }}
+    >
       <div className="card-header">
-        <span className="card-topic-badge">{details.core_topic || 'Reel Extract'}</span>
+        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+          <span className="card-topic-badge">{topic.toUpperCase()}</span>
+          {mainTool && <span className="card-tool-badge">{mainTool}</span>}
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <span className="card-date">{formatDate(reel.created_at)}</span>
-          <button className="delete-btn" title="Delete reel" onClick={(e) => handleDelete(reel.id, e)}>
-            <Trash2 size={15} />
+          <button 
+            className="delete-btn" 
+            title="Delete reel" 
+            onClick={(e) => handleDelete(reel.id, e)}
+          >
+            <Trash2 size={14} />
           </button>
         </div>
       </div>
+      
       <h3 className="card-title">{reel.title || 'Untitled Extraction'}</h3>
-      <p className="card-takeaway">{details.key_takeaway}</p>
+      <p className="card-takeaway">{details.key_takeaway || reel.post_caption || 'No description extracted.'}</p>
 
       <div className="card-footer">
-        <div className="stat-item">
-          <Clock size={14} />
-          <span>{details.action_items?.length || 0} tasks</span>
-        </div>
         <span className="read-more-link">
-          View details <ArrowRight size={14} />
+          {statusText.toUpperCase()}
         </span>
+        <div className="stat-item">
+          <span>{completedActions}/{totalActions || 1} Check</span>
+        </div>
       </div>
     </article>
   );
 }
+
