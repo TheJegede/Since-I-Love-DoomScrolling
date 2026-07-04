@@ -76,8 +76,12 @@ init_local_db()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    if os.getenv("ENABLE_WORKER", "1") == "0":
-        logger.info("ENABLE_WORKER=0 — queue worker disabled.")
+    is_hf_space = "SPACE_ID" in os.environ
+    if os.getenv("ENABLE_WORKER", "1") == "0" or is_hf_space:
+        if is_hf_space:
+            logger.info("Running on Hugging Face Space — auto-disabling queue worker to prevent datacenter IP blocks.")
+        else:
+            logger.info("ENABLE_WORKER=0 — queue worker disabled.")
     else:
         threading.Thread(target=_worker_loop, daemon=True).start()
     yield
