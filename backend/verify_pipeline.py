@@ -572,8 +572,9 @@ def test_url_validation_helper():
     from main import is_valid_instagram_reel
     assert is_valid_instagram_reel("https://www.instagram.com/reel/C7xY9/") is True
     assert is_valid_instagram_reel("http://instagram.com/reel/abc-123_XYZ/?query=1") is True
+    assert is_valid_instagram_reel("https://instagram.com/reels/abc-123/") is True
+    assert is_valid_instagram_reel("https://instagram.com/p/abc/") is True
     assert is_valid_instagram_reel("https://google.com") is False
-    assert is_valid_instagram_reel("https://instagram.com/p/abc/") is False
     assert is_valid_instagram_reel("invalid-url") is False
     assert is_valid_instagram_reel("") is False
     print("[OK] URL validation helper passed!")

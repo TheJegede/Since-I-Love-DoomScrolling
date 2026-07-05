@@ -307,13 +307,18 @@ def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
 def is_valid_instagram_reel(url: str) -> bool:
     if not url:
         return False
-    # Strict regex pattern matching Instagram Reel paths
-    pattern = r"^https?://(www\.)?instagram\.com/reel/[A-Za-z0-9_\-]+/?.*$"
+    # Relaxed regex pattern matching Instagram Reel, Reels plural, or post paths
+    pattern = r"^https?://(www\.)?instagram\.com/(?:reel|reels|p)/[A-Za-z0-9_\-]+/?.*$"
     return bool(re.match(pattern, url.strip()))
 
 def get_cookie_file() -> Optional[str]:
-    """Check for cookies.txt in common paths to bypass Instagram scraping blocks."""
+    """Check for cookies.txt in absolute and relative paths to bypass Instagram scraping blocks."""
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    parent_dir = os.path.dirname(current_dir)
+    
     paths = [
+        os.path.join(current_dir, "cookies.txt"),
+        os.path.join(parent_dir, "cookies.txt"),
         "cookies.txt",
         "backend/cookies.txt",
         "/app/cookies.txt",
@@ -331,7 +336,7 @@ def download_and_extract_audio(url: str) -> tuple[str, str, str]:
     cookie_file = get_cookie_file()
 
     # Extract Reel ID from the URL (fallback to UUID if match fails)
-    match = re.search(r"/reel/([A-Za-z0-9_\-]+)", url)
+    match = re.search(r"/(?:reel|reels|p)/([A-Za-z0-9_\-]+)", url)
     reel_id = match.group(1) if match else str(uuid.uuid4())
 
     ydl_opts = {
@@ -460,6 +465,13 @@ def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
         
         # Parse and validate structure
         data = json.loads(content)
+        if isinstance(data, list):
+            if len(data) > 0:
+                data = data[0]
+            else:
+                raise ValueError("LLM returned an empty JSON array.")
+        if not isinstance(data, dict):
+            raise ValueError(f"Expected JSON object, got {type(data).__name__}")
         validated_data = ReelExtraction(**data)
         return validated_data
     except json.JSONDecodeError as je:
