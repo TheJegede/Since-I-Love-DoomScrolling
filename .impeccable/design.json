@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-05T14:12:00Z",
+  "title": "Design System: Transcriber",
+  "extensions": {
+    "colorMeta": {
+      "primary": { "role": "primary", "displayName": "Obsidian Ink", "canonical": "oklch(0% 0 0)", "tonalRamp": ["#000000", "#121212", "#1f2937", "#4b5563", "#9ca3af", "#d1d5db", "#f3f4f6", "#ffffff"] },
+      "neutral-bg": { "role": "neutral", "displayName": "Clean Canvas", "canonical": "oklch(100% 0 0)", "tonalRamp": ["#000000", "#121212", "#1f2937", "#4b5563", "#9ca3af", "#d1d5db", "#f3f4f6", "#ffffff"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display Header", "purpose": "Hero and main page header." },
+      "body": { "displayName": "Body Text", "purpose": "Standard prose and content summaries." }
+    },
+    "shadows": [],
+    "motion": [
+      { "name": "transition-smooth", "value": "background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, transform 0.15s ease", "purpose": "Standard interactive element transitions." }
+    ],
+    "breakpoints": [
+      { "name": "sm", "value": "640px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Primary action button used for ingestion.",
+      "html": "<button class=\"ds-btn-primary\">Ingest Reel</button>",
+      "css": ".ds-btn-primary { background: #000000; color: #ffffff; padding: 12px 28px; font-weight: 600; font-size: 0.95rem; border: 1px solid #000000; border-radius: 2px; cursor: pointer; transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease; } .ds-btn-primary:hover { background: #f3f4f6; color: #000000; border-color: #f3f4f6; }"
+    },
+    {
+      "name": "Reel Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Card showing parsed reels data.",
+      "html": "<article class=\"ds-reel-card\"><div class=\"ds-card-header\"><span class=\"ds-topic-badge\">MARKETING</span><span class=\"ds-card-date\">Just now</span></div><h3 class=\"ds-card-title\">How to grow on Instagram</h3><p class=\"ds-card-takeaway\">Consistency is key. Use high-quality hooks and edit with fast visual cuts.</p><div class=\"ds-card-footer\"><span>INSPECT INDEX →</span><span>3/5 Check</span></div></article>",
+      "css": ".ds-reel-card { background: #ffffff; border: 1px solid #000000; border-radius: 2px; padding: 1.75rem; display: flex; flex-direction: column; cursor: pointer; transition: background-color 0.2s ease, border-color 0.2s ease; } .ds-reel-card:hover { border-color: #000000; background: rgba(0,0,0,0.04); } .ds-card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; } .ds-topic-badge { background: rgba(0,0,0,0.04); border: 1px solid #000000; padding: 0.25rem 0.65rem; font-size: 0.75rem; font-weight: 600; border-radius: 20px; } .ds-card-date { font-size: 0.75rem; color: #78788a; } .ds-card-title { font-size: 1.15rem; font-weight: 700; line-height: 1.4; margin-bottom: 0.5rem; color: #000000; } .ds-card-takeaway { font-size: 0.9rem; color: #4b5563; line-height: 1.5; margin-bottom: 1.5rem; } .ds-card-footer { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; color: #000000; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Obsidian Desk",
+    "overview": "The Transcriber visual identity is an elevated, high-contrast monochrome workspace. Inspired by architectural blueprints, physical desks, and industrial terminal interfaces, the design leverages stark pure-white/pure-black surfaces, sharp 2px radius borders, and intentional accent spacing to build a clutter-free environment.",
+    "keyCharacteristics": ["Stark Contrast", "Sharp Outlines", "Typographic Focus", "Intentional Transitions"],
+    "rules": [
+      { "name": "The Monochrome Dominance Rule", "body": "Brand surfaces and primary elements must remain strictly black and white. Saturated colors are reserved exclusively for status states (success, pending, failed) and must cover <=5% of the total screen area.", "section": "colors" }
+    ],
+    "dos": [
+      "Do maintain a strict 2px border radius on all cards, buttons, and input fields.",
+      "Do ensure that text elements have clear contrast.",
+      "Do use CSS transitions on hover and focus to provide instant feedback."
+    ],
+    "donts": [
+      "Don't use side-stripe borders or colored left-borders on cards or alerts.",
+      "Don't apply text gradients or background-clip: text for display headings.",
+      "Don't use soft drop shadows to separate normal cards.",
+      "Don't animate image scale, translation, or rotation on card hover.",
+      "Don't use low-contrast muted grays for body or description text."
+    ]
+  }
+}

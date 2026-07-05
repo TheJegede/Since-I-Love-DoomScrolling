@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Clapperboard, UploadCloud, Check,
 } from 'lucide-react';
@@ -15,24 +16,17 @@ export default function IngestionPanel(props) {
     currentStep, steps,
   } = props;
 
+  const [isDragging, setIsDragging] = useState(false);
+  const [isBatchDragging, setIsBatchDragging] = useState(false);
+
   return (
     <section className="glass ingestion-panel">
-      <div style={{ display: 'flex', gap: '1.5rem', borderBottom: '1px solid var(--glass-border)', paddingBottom: '1rem', marginBottom: '1.5rem' }}>
+      <div className="ingestion-tabs">
         {ingestionTabs.map(({ key, label, Icon }) => (
           <button
             key={key}
-            className={`alt-input-btn ${mode === key ? 'active' : ''}`}
+            className={`ingestion-tab ${mode === key ? 'active' : ''}`}
             onClick={() => setMode(key)}
-            style={{
-              borderBottom: mode === key ? '2px solid var(--accent-primary)' : 'none',
-              paddingBottom: '0.5rem',
-              color: mode === key ? 'var(--text-primary)' : 'var(--text-muted)',
-              fontWeight: 600,
-              fontSize: '0.85rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-            }}
           >
             <Icon size={16} /> <span>{label.toUpperCase()}</span>
           </button>
@@ -63,9 +57,10 @@ export default function IngestionPanel(props) {
       {mode === 'file' && (
         <form onSubmit={handleFileSubmit}>
           <div 
-            className="upload-zone"
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleFileDrop}
+            className={`upload-zone ${isDragging ? 'dragging' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
+            onDrop={(e) => { setIsDragging(false); handleFileDrop(e); }}
             onClick={() => fileInputRef.current.click()}
           >
             <input 
@@ -147,7 +142,10 @@ export default function IngestionPanel(props) {
       {mode === 'bulk' && (
         <form onSubmit={handleBatchSubmit}>
           <div 
-            className="upload-zone"
+            className={`upload-zone ${isBatchDragging ? 'dragging' : ''}`}
+            onDragOver={(e) => { e.preventDefault(); setIsBatchDragging(true); }}
+            onDragLeave={(e) => { e.preventDefault(); setIsBatchDragging(false); }}
+            onDrop={(e) => { setIsBatchDragging(false); handleFileDrop(e); }} // reusable file drop trigger
             onClick={() => batchInputRef.current.click()}
           >
             <input 

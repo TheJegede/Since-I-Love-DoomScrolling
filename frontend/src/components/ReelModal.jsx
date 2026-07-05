@@ -1,5 +1,5 @@
 import {
-  X, ExternalLink, Trash2, Copy, Check, FileAudio, Info, ChevronUp, ChevronDown,
+  X, ExternalLink, Trash2, Copy, Check, FileAudio, Info, ChevronDown,
 } from 'lucide-react';
 
 export default function ReelModal({
@@ -109,12 +109,15 @@ export default function ReelModal({
                       onChange={() => toggleCheckAction(reel.id, index)}
                     />
                     <span className="action-text">{item}</span>
-                    <button
-                      onClick={() => handleCopy(item, `action-${index}`)}
-                      style={{ marginLeft: 'auto', background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
-                    >
-                      {copiedText === `action-${index}` ? <Check size={14} style={{ color: 'var(--accent-success)' }} /> : <Copy size={14} />}
-                    </button>
+                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      {copiedText === `action-${index}` && <span style={{ fontSize: '0.7rem', color: 'var(--accent-success)', fontWeight: 'bold' }}>COPIED</span>}
+                      <button
+                        onClick={() => handleCopy(item, `action-${index}`)}
+                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                      >
+                        {copiedText === `action-${index}` ? <Check size={14} style={{ color: 'var(--accent-success)' }} /> : <Copy size={14} />}
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -129,12 +132,15 @@ export default function ReelModal({
               {details.tools_or_resources.map((tool, idx) => (
                 <div key={idx} className="tool-tag">
                   <span>{tool}</span>
-                  <button
-                    onClick={() => handleCopy(tool, `tool-${idx}`)}
-                    style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
-                  >
-                    {copiedText === `tool-${idx}` ? <Check size={12} style={{ color: 'var(--accent-success)' }} /> : <Copy size={12} className="tool-copy-icon" />}
-                  </button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                    {copiedText === `tool-${idx}` && <span style={{ fontSize: '0.65rem', color: 'var(--accent-success)', fontWeight: 'bold' }}>COPIED</span>}
+                    <button
+                      onClick={() => handleCopy(tool, `tool-${idx}`)}
+                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                    >
+                      {copiedText === `tool-${idx}` ? <Check size={12} style={{ color: 'var(--accent-success)' }} /> : <Copy size={12} className="tool-copy-icon" />}
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -146,7 +152,7 @@ export default function ReelModal({
             <div className="transcript-accordion">
               <button className="accordion-trigger" onClick={() => setIsTranscriptOpen(!isTranscriptOpen)}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><FileAudio size={16} /> Voice Transcript</span>
-                {isTranscriptOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                <ChevronDown className={`accordion-chevron ${isTranscriptOpen ? 'open' : ''}`} size={16} />
               </button>
               {isTranscriptOpen && (
                 <div className="accordion-content">{reel.raw_transcript}</div>
@@ -160,7 +166,7 @@ export default function ReelModal({
             <div className="transcript-accordion">
               <button className="accordion-trigger" onClick={() => setIsCaptionOpen(!isCaptionOpen)}>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Info size={16} /> Post Caption / Metadata</span>
-                {isCaptionOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                <ChevronDown className={`accordion-chevron ${isCaptionOpen ? 'open' : ''}`} size={16} />
               </button>
               {isCaptionOpen && (
                 <div className="accordion-content">{reel.post_caption}</div>

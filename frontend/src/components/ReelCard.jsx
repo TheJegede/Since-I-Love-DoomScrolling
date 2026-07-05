@@ -33,7 +33,7 @@ export default function ReelCard({ reel, onSelect, formatDate, handleDelete, che
     <article 
       className="glass glass-interactive reel-card" 
       onClick={() => onSelect(reel)}
-      style={{ opacity: reel.status && reel.status !== 'done' ? 0.8 : 1 }}
+      style={{ opacity: reel.status && reel.status !== 'done' ? 0.9 : 1 }}
     >
       <div className="card-header">
         <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
@@ -45,7 +45,10 @@ export default function ReelCard({ reel, onSelect, formatDate, handleDelete, che
           <button 
             className="delete-btn" 
             title="Delete reel" 
-            onClick={(e) => handleDelete(reel.id, e)}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDelete(reel.id, e);
+            }}
           >
             <Trash2 size={14} />
           </button>
@@ -53,15 +56,30 @@ export default function ReelCard({ reel, onSelect, formatDate, handleDelete, che
       </div>
       
       <h3 className="card-title">{reel.title || 'Untitled Extraction'}</h3>
-      <p className="card-takeaway">{details.key_takeaway || reel.post_caption || 'No description extracted.'}</p>
+      
+      {reel.status && reel.status !== 'done' ? (
+        <div className="card-processing-status">
+          <div className="status-label">
+            <span className={`status-dot-pulse ${reel.status}`}></span>
+            <span>{reel.status === 'processing' ? 'Processing Reel...' : reel.status === 'failed' ? 'Failed' : 'Queued'}</span>
+          </div>
+          <div className="card-progress-track">
+            <div className={`card-progress-fill ${reel.status}`}></div>
+          </div>
+        </div>
+      ) : (
+        <p className="card-takeaway">{details.key_takeaway || reel.post_caption || 'No description extracted.'}</p>
+      )}
 
       <div className="card-footer">
         <span className="read-more-link">
           {statusText.toUpperCase()}
         </span>
-        <div className="stat-item">
-          <span>{completedActions}/{totalActions || 1} Check</span>
-        </div>
+        {reel.status === 'done' && (
+          <div className="stat-item">
+            <span>{completedActions}/{totalActions || 1} Check</span>
+          </div>
+        )}
       </div>
     </article>
   );

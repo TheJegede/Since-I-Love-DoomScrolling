@@ -27,3 +27,5 @@ backend/batch_progress.json
 # Agent-specific
 .agents/
 skills-lock.json
+
+PRODUCT.md
