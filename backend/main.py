@@ -372,7 +372,8 @@ def download_and_extract_audio(url: str) -> tuple[str, str, str]:
             logger.info(f"Successfully downloaded audio to: {mp3_path}")
             return mp3_path, post_caption, title
     except Exception as e:
-        logger.error(f"Error downloading or extracting audio: {str(e)}")
+        err_msg = str(e)
+        logger.error(f"Error downloading or extracting audio: {err_msg}")
         # Clean up any leftover temp files on download error
         for f in glob.glob(os.path.join(temp_dir, f"video_{reel_id}.*")):
             try:
@@ -380,10 +381,19 @@ def download_and_extract_audio(url: str) -> tuple[str, str, str]:
                 logger.info(f"Cleaned up failed download file: {f}")
             except Exception as ce:
                 logger.warning(f"Could not delete temp file {f}: {str(ce)}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to download or parse Instagram Reel. Meta may be blocking the request. Error: {str(e)}"
-        )
+        
+        err_msg_lower = err_msg.lower()
+        if any(x in err_msg_lower for x in ["empty media response", "cookies", "login", "authenticate"]):
+            status_code = 403
+            detail = f"Instagram session cookies are expired or missing. Please export your browser cookies to backend/cookies.txt. Error: {err_msg}"
+        elif any(x in err_msg_lower for x in ["no video formats found", "extractorerror", "unsupported url"]):
+            status_code = 415
+            detail = f"This post is a photo carousel. The Transcriber only supports videos and reels. Error: {err_msg}"
+        else:
+            status_code = 500
+            detail = f"Failed to download or parse Instagram Reel. Meta may be blocking the request. Error: {err_msg}"
+
+        raise HTTPException(status_code=status_code, detail=detail)
 
 def transcribe_audio(file_path: str) -> str:
     """Transcribe audio using Groq Whisper large v3 turbo."""
@@ -717,10 +727,15 @@ def process_pending_reel(row: dict) -> None:
         logger.info(f"Worker processed reel {reel_id} ({url})")
     except HTTPException as e:
         logger.warning(f"Worker failed reel {reel_id}: {e.detail}")
-        db.mark_failed(reel_id, e.detail)
+        status = "failed"
+        if e.status_code == 403:
+            status = "cookies_expired"
+        elif e.status_code == 415:
+            status = "unsupported_format"
+        db.mark_failed_with_status(reel_id, e.detail, status)
     except Exception as e:
         logger.error(f"Worker error on reel {reel_id}: {str(e)}")
-        db.mark_failed(reel_id, str(e))
+        db.mark_failed_with_status(reel_id, str(e), "failed")
 
 
 def worker_tick() -> bool:

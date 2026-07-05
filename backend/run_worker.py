@@ -18,6 +18,21 @@ from main import worker_tick
 
 if __name__ == "__main__":
     logger.info("Standalone reels queue worker started locally.")
+    
+    # Auto-update yt-dlp quietly at startup to bypass Meta/Instagram scraper blocks
+    logger.info("Checking for yt-dlp updates...")
+    try:
+        import subprocess
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True
+        )
+        logger.info("yt-dlp is up to date.")
+    except Exception as ue:
+        logger.warning(f"Could not auto-update yt-dlp: {str(ue)}")
+        
     if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_KEY"):
         logger.error("SUPABASE_URL / SUPABASE_SERVICE_KEY env vars not set. Exiting.")
         sys.exit(1)

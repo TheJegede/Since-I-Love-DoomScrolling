@@ -22,5 +22,6 @@ export function rowToRecord(r) {
     created_at: r.created_at,
     cluster: r.cluster || 'Unclustered',
     status: r.status || 'done',
+    error: r.error || null,
   };
 }

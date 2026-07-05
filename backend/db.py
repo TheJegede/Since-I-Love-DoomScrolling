@@ -47,6 +47,7 @@ def row_to_record(r: dict) -> dict:
         "created_at": r.get("created_at"),
         "cluster": r.get("cluster") or "Unclustered",
         "status": r.get("status") or "done",
+        "error": r.get("error"),
     }
 
 
@@ -74,7 +75,7 @@ def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
 
 
 def list_reels(limit: int = 20, search: Optional[str] = None) -> list:
-    q = get_client().table(TABLE).select("id, url, title, extracted_json, created_at, cluster, status").order("created_at", desc=True).limit(limit)
+    q = get_client().table(TABLE).select("id, url, title, extracted_json, created_at, cluster, status, error").order("created_at", desc=True).limit(limit)
     if search:
         # UI filters in-memory; this server search is a coarse fallback over text cols.
         like = f"%{search}%"
@@ -136,12 +137,17 @@ def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
     }).eq("id", reel_id).execute()
 
 
-def mark_failed(reel_id: str, error) -> None:
-    """Mark a claimed row failed, recording a truncated error message."""
+def mark_failed_with_status(reel_id: str, error, status: str = "failed") -> None:
+    """Mark a claimed row with a specific failure status, recording a truncated error message."""
     get_client().table(TABLE).update({
-        "status": "failed",
+        "status": status,
         "error": str(error)[:500],
     }).eq("id", reel_id).execute()
+
+
+def mark_failed(reel_id: str, error) -> None:
+    """Mark a claimed row failed, recording a truncated error message."""
+    mark_failed_with_status(reel_id, error, "failed")
 
 
 def cluster_counts() -> list:

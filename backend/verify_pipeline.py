@@ -294,12 +294,15 @@ def test_worker_tick_failure():
     import main
     from fastapi import HTTPException
     captured = {}
-    orig = (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed)
+    orig = (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed, main.db.mark_failed_with_status)
     main.db.claim_next_pending = lambda: {"id": "row2", "url": "https://www.instagram.com/reel/F/"}
     def _boom(url):
         raise HTTPException(status_code=500, detail="Meta blocking request")
     main.download_and_extract_audio = _boom
-    main.db.mark_failed = lambda reel_id, error: captured.update({"id": reel_id, "error": str(error)})
+    
+    mock_mark = lambda reel_id, error, status="failed": captured.update({"id": reel_id, "error": str(error), "status": status})
+    main.db.mark_failed = lambda reel_id, error: mock_mark(reel_id, error)
+    main.db.mark_failed_with_status = mock_mark
     try:
         did = main.worker_tick()
         assert did is True
@@ -307,7 +310,7 @@ def test_worker_tick_failure():
         assert "Meta blocking" in captured["error"]
         print("[OK] worker_tick failure passed!")
     finally:
-        (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed) = orig
+        (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed, main.db.mark_failed_with_status) = orig
 
 
 def test_worker_tick_empty():

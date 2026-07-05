@@ -149,7 +149,7 @@ export default function App() {
       if (supabase) {
         const { data, error } = await supabase
           .from('saved_reels')
-          .select('id, url, title, extracted_json, created_at, cluster, status')
+          .select('id, url, title, extracted_json, created_at, cluster, status, error')
           .order('created_at', { ascending: false })
           .limit(500);
         if (error) throw error;
@@ -182,7 +182,7 @@ export default function App() {
   // Keep a ref of whether any reel is still queued/processing, so the polling
   // interval below can read the latest value without being torn down each change.
   useEffect(() => {
-    anyPendingRef.current = reels.some(r => r.status && r.status !== 'done' && r.status !== 'failed');
+    anyPendingRef.current = reels.some(r => r.status === 'pending' || r.status === 'processing');
   }, [reels]);
 
   // While any reel is queued/processing, poll so it fills in once the worker finishes.

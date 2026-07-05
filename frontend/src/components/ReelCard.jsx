@@ -23,6 +23,10 @@ export default function ReelCard({ reel, onSelect, formatDate, handleDelete, che
     statusText = 'FAILED →';
   } else if (reel.status === 'pending') {
     statusText = 'QUEUED →';
+  } else if (reel.status === 'unsupported_format') {
+    statusText = 'UNSUPPORTED →';
+  } else if (reel.status === 'cookies_expired') {
+    statusText = 'BAD COOKIES →';
   }
 
   return (
