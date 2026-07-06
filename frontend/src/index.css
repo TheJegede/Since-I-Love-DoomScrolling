@@ -1027,3 +1027,74 @@ body {
   }
 }
 
+
+/* Re-imagined product workspace tokens */
+:root {
+  --bg-dark: oklch(98.5% 0.002 250);
+  --bg-card: oklch(100% 0 0);
+  --bg-input: oklch(96.5% 0.003 250);
+  --rail-bg: oklch(94% 0.004 250);
+  --grid-line: oklch(90% 0.004 250 / 0.65);
+  --accent-primary: oklch(45% 0.17 260);
+  --accent-primary-glow: oklch(45% 0.17 260 / 0.14);
+  --accent-secondary: oklch(91% 0.018 260);
+  --accent-success: oklch(58% 0.16 150);
+  --accent-warning: oklch(66% 0.16 72);
+  --accent-danger: oklch(58% 0.19 25);
+  --text-primary: oklch(14% 0.006 250);
+  --text-secondary: oklch(34% 0.009 250);
+  --text-muted: oklch(48% 0.008 250);
+  --glass-bg: var(--bg-card);
+  --glass-border: oklch(82% 0.005 250);
+  --glass-border-hover: oklch(18% 0.006 250);
+  --hover-bg: oklch(95% 0.006 250);
+  --selected-bg: oklch(92% 0.01 250);
+  --selected-strong-bg: oklch(14% 0.006 250);
+  --selected-strong-text: oklch(99% 0 0);
+  --primary-action-bg: oklch(14% 0.006 250);
+  --primary-action-text: oklch(99% 0 0);
+  --primary-action-hover: oklch(24% 0.009 250);
+  --warning-bg: oklch(94% 0.035 72);
+  --warning-border: oklch(78% 0.12 72);
+  --danger-bg: oklch(94% 0.03 25);
+  --danger-border: oklch(72% 0.13 25);
+  --modal-backdrop: oklch(8% 0.006 250 / 0.72);
+  --skeleton-bg: oklch(88% 0.006 250);
+  --skeleton-sheen: oklch(96% 0.003 250 / 0.8);
+  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}
+
+:root.dark {
+  --bg-dark: oklch(12% 0.007 250);
+  --bg-card: oklch(16.5% 0.007 250);
+  --bg-input: oklch(10% 0.006 250);
+  --rail-bg: oklch(14% 0.007 250);
+  --grid-line: oklch(24% 0.006 250 / 0.55);
+  --accent-primary: oklch(70% 0.18 260);
+  --accent-primary-glow: oklch(70% 0.18 260 / 0.16);
+  --accent-secondary: oklch(24% 0.012 260);
+  --accent-success: oklch(72% 0.16 150);
+  --accent-warning: oklch(76% 0.15 72);
+  --accent-danger: oklch(68% 0.18 25);
+  --text-primary: oklch(97% 0.002 250);
+  --text-secondary: oklch(78% 0.004 250);
+  --text-muted: oklch(64% 0.005 250);
+  --glass-bg: var(--bg-card);
+  --glass-border: oklch(28% 0.007 250);
+  --glass-border-hover: oklch(92% 0.003 250);
+  --hover-bg: oklch(19% 0.008 250);
+  --selected-bg: oklch(22% 0.009 250);
+  --selected-strong-bg: oklch(94% 0.002 250);
+  --selected-strong-text: oklch(10% 0.006 250);
+  --primary-action-bg: oklch(94% 0.002 250);
+  --primary-action-text: oklch(10% 0.006 250);
+  --primary-action-hover: oklch(86% 0.004 250);
+  --warning-bg: oklch(22% 0.035 72);
+  --warning-border: oklch(55% 0.12 72);
+  --danger-bg: oklch(21% 0.035 25);
+  --danger-border: oklch(48% 0.13 25);
+  --modal-backdrop: oklch(4% 0.004 250 / 0.78);
+  --skeleton-bg: oklch(24% 0.006 250);
+  --skeleton-sheen: oklch(34% 0.006 250 / 0.7);
+  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><polyline points='6 9 12 15 18 9'/></svg>");
+}

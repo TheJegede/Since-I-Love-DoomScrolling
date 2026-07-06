@@ -555,204 +555,223 @@ export default function App() {
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
   const endIndex = startIndex + ITEMS_PER_PAGE;
   const paginatedReels = filteredReels.slice(startIndex, endIndex);
+  const completedCount = reels.filter(r => !r.status || r.status === 'done').length;
+  const activeCount = reels.filter(r => r.status && r.status !== 'done').length;
 
   return (
-    <div className="app-container">
-      {/* Header */}
-      <header className="app-header">
-        <div className="header-top">
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="topbar-brand">
           <div className="logo-container">
             <Clapperboard className="logo-icon" size={32} />
             <h1 className="logo-text">REEL TRANSCRIBER</h1>
           </div>
-          <div className="header-meta">
-            <button 
-              className="theme-toggle-btn" 
-              onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
-              aria-label="Toggle theme"
-            >
-              {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
-              <span>{theme === 'light' ? 'DARK MODE' : 'LIGHT MODE'}</span>
-            </button>
-            <span className="system-status">
-              STATUS: <span className="status-dot">●</span> LOCAL CORP V2.0
-            </span>
-          </div>
+          <p className="app-subtitle">
+            Extract structured key insights, tools, and checklist actions from saved short-form media.
+          </p>
         </div>
-        <p className="app-subtitle">
-          Extract structured key insights, tool lists, and checklist action items automatically from educational Instagram Reels. Zero color gradient slop.
-        </p>
-      </header>
-
-      {/* Backend Wake-up Notice */}
-      {isWakingUp && (
-        <div className="wake-alert">
-          <div className="wake-pulse"></div>
-          <div>
-            <strong>Connecting to local extraction server...</strong> Ingestion and cluster recomputation require the backend to be running locally.
-          </div>
-        </div>
-      )}
-
-      {/* Error Alert */}
-      {error && (
-        <div className="wake-alert" style={{ background: 'rgba(239, 68, 68, 0.08)', borderColor: 'rgba(239, 68, 68, 0.2)', color: 'hsl(0, 84%, 60%)' }}>
-          <AlertTriangle size={18} />
-          <div style={{ flex: 1 }}>{error}</div>
-          <button onClick={() => setError(null)} style={{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer' }}>
-            <X size={16} />
+        <div className="header-meta">
+          <span className="system-status">
+            <span className="status-dot">●</span> LOCAL CORP V2.0
+          </span>
+          <button 
+            className="theme-toggle-btn" 
+            onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
+            aria-label="Toggle theme"
+          >
+            {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
+            <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
           </button>
         </div>
-      )}
+      </header>
 
-      {/* Extraction Ingestion Panel */}
-      <IngestionPanel
-        mode={mode} setMode={setMode} ingestionTabs={ingestionTabs} isLoading={isLoading}
-        url={url} setUrl={setUrl} handleUrlSubmit={handleUrlSubmit}
-        file={file} setFile={setFile} fileTitle={fileTitle} setFileTitle={setFileTitle}
-        fileCaption={fileCaption} setFileCaption={setFileCaption} fileInputRef={fileInputRef}
-        handleFileDrop={handleFileDrop} handleFileSelect={handleFileSelect} handleFileSubmit={handleFileSubmit}
-        textTitle={textTitle} setTextTitle={setTextTitle} textCaption={textCaption} setTextCaption={setTextCaption}
-        textTranscript={textTranscript} setTextTranscript={setTextTranscript} handleTextSubmit={handleTextSubmit}
-        batchFile={batchFile} batchInputRef={batchInputRef} handleBatchSelect={handleBatchSelect}
-        handleBatchSubmit={handleBatchSubmit} isBatchRunning={isBatchRunning} batchJob={batchJob}
-        currentStep={currentStep} steps={steps}
-      />
-
-      {/* Dashboard Section */}
-      <section>
-        <div className="dashboard-controls">
-          <h2 className="dashboard-title">
-            <Database size={20} className="logo-icon" />
-            Saved Extracted Insights
-          </h2>
-          <div className="search-bar">
-            <Search size={18} />
-            <input 
-              type="text" 
-              placeholder="Search topics, actions, tools..." 
-              value={searchQuery}
-              onChange={handleSearchChange}
-            />
+      <div className="workspace-layout">
+        <aside className="workspace-rail" aria-label="Insight filters">
+          <div className="rail-section rail-summary">
+            <span className="control-label">Library</span>
+            <strong>{reels.length}</strong>
+            <div className="rail-metrics" aria-label="Library status">
+              <span>{completedCount} indexed</span>
+              <span>{activeCount} active</span>
+            </div>
           </div>
-        </div>
 
-        {reels.length > 0 && (
-          <div className="controls-bar">
-            <div className="control-group">
-              <span className="control-label">CLUSTER TAG</span>
-              <select value={clusterFilter} onChange={e => { setClusterFilter(e.target.value); setCurrentPage(1); }}>
-                <option value="All">All clusters</option>
-                {clusters.map(c => (
-                  <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
-                ))}
-              </select>
+          <div className="rail-section">
+            <label className="control-label" htmlFor="insight-search">Search</label>
+            <div className="search-bar">
+              <Search size={18} />
+              <input
+                id="insight-search"
+                type="text"
+                placeholder="Search topics, actions, tools..."
+                value={searchQuery}
+                onChange={handleSearchChange}
+              />
             </div>
+          </div>
 
-            <div className="control-group">
-              <span className="control-label">TOOL FILTER</span>
-              <select value={toolFilter} onChange={e => { setToolFilter(e.target.value); setCurrentPage(1); }}>
-                <option value="All">All tools</option>
-                {allTools.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-            </div>
+          {reels.length > 0 && (
+            <>
+              <div className="control-group">
+                <label className="control-label" htmlFor="cluster-filter">Cluster tag</label>
+                <select id="cluster-filter" value={clusterFilter} onChange={e => { setClusterFilter(e.target.value); setCurrentPage(1); }}>
+                  <option value="All">All clusters</option>
+                  {clusters.map(c => (
+                    <option key={c.name} value={c.name}>{c.name} ({c.count})</option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="control-group">
-              <span className="control-label">ORDER BY DATE</span>
-              <select value={sortOrder} onChange={e => { setSortOrder(e.target.value); setCurrentPage(1); }}>
-                <option value="newest">NEWEST FIRST</option>
-                <option value="oldest">OLDEST FIRST</option>
-              </select>
-            </div>
+              <div className="control-group">
+                <label className="control-label" htmlFor="tool-filter">Tool filter</label>
+                <select id="tool-filter" value={toolFilter} onChange={e => { setToolFilter(e.target.value); setCurrentPage(1); }}>
+                  <option value="All">All tools</option>
+                  {allTools.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
 
-            <div className="control-group">
-              <span className="control-label">VIEW LAYOUT</span>
-              <div className="view-toggle">
-                <button className={viewMode === 'cards' ? 'active' : ''} onClick={() => setViewMode('cards')}>CARDS</button>
-                <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>TABLE</button>
+              <div className="control-group">
+                <label className="control-label" htmlFor="sort-order">Order by date</label>
+                <select id="sort-order" value={sortOrder} onChange={e => { setSortOrder(e.target.value); setCurrentPage(1); }}>
+                  <option value="newest">Newest first</option>
+                  <option value="oldest">Oldest first</option>
+                </select>
+              </div>
+
+              {!isWakingUp && (
+                <button className="recompute-btn" onClick={handleRecompute} disabled={isRecomputing}>
+                  {isRecomputing ? 'Clustering...' : 'Recompute clusters'}
+                </button>
+              )}
+            </>
+          )}
+        </aside>
+
+        <main className="workspace-main">
+          {isWakingUp && (
+            <div className="wake-alert">
+              <div className="wake-pulse"></div>
+              <div>
+                <strong>Connecting to local extraction server...</strong> Ingestion and cluster recomputation require the backend to be running locally.
               </div>
             </div>
+          )}
 
-            {!isWakingUp && (
-              <button className="recompute-btn" style={{ alignSelf: 'flex-end', marginBottom: '1px' }} onClick={handleRecompute} disabled={isRecomputing}>
-                {isRecomputing ? 'CLUSTERING…' : 'RECOMPUTE CLUSTERS'}
+          {error && (
+            <div className="wake-alert error-alert">
+              <AlertTriangle size={18} />
+              <div className="alert-copy">{error}</div>
+              <button className="alert-close" onClick={() => setError(null)} aria-label="Dismiss error">
+                <X size={16} />
               </button>
-            )}
-          </div>
-        )}
-
-        {isFetching ? (
-          viewMode === 'table' ? (
-            <TableSkeleton />
-          ) : (
-            <div className="reels-grid">
-              {[1, 2, 3, 4, 5, 6].map(i => <Skeleton key={i} />)}
             </div>
-          )
-        ) : reels.length === 0 ? (
-          <div className="glass empty-state">
-            <Sparkles size={48} className="empty-state-icon" style={{ margin: '0 auto 1rem auto' }} />
-            <p>No extractions found. Input a Reel URL above to kickstart the autonomous pipeline!</p>
-          </div>
-        ) : viewMode === 'table' ? (
-          <InsightsTable
-            reels={paginatedReels}
-            onSelect={handleSelectReel}
-            formatDate={formatDate}
-            handleDelete={handleDelete}
+          )}
+
+          <IngestionPanel
+            mode={mode} setMode={setMode} ingestionTabs={ingestionTabs} isLoading={isLoading}
+            url={url} setUrl={setUrl} handleUrlSubmit={handleUrlSubmit}
+            file={file} setFile={setFile} fileTitle={fileTitle} setFileTitle={setFileTitle}
+            fileCaption={fileCaption} setFileCaption={setFileCaption} fileInputRef={fileInputRef}
+            handleFileDrop={handleFileDrop} handleFileSelect={handleFileSelect} handleFileSubmit={handleFileSubmit}
+            textTitle={textTitle} setTextTitle={setTextTitle} textCaption={textCaption} setTextCaption={setTextCaption}
+            textTranscript={textTranscript} setTextTranscript={setTextTranscript} handleTextSubmit={handleTextSubmit}
+            batchFile={batchFile} batchInputRef={batchInputRef} handleBatchSelect={handleBatchSelect}
+            handleBatchSubmit={handleBatchSubmit} isBatchRunning={isBatchRunning} batchJob={batchJob}
+            currentStep={currentStep} steps={steps}
           />
-        ) : (
-          <div className="reels-grid">
-            {paginatedReels.map((reel) => (
-              <ReelCard
-                key={reel.id}
-                reel={reel}
+
+          <section className="insights-section">
+            <div className="dashboard-controls">
+              <div>
+                <h2 className="dashboard-title">
+                  <Database size={20} className="logo-icon" />
+                  Saved Extracted Insights
+                </h2>
+                <p className="dashboard-subtitle">
+                  {filteredReels.length} result{filteredReels.length === 1 ? '' : 's'} in the current view
+                </p>
+              </div>
+
+              {reels.length > 0 && (
+                <div className="view-toggle" aria-label="View layout">
+                  <button className={viewMode === 'cards' ? 'active' : ''} onClick={() => setViewMode('cards')}>Cards</button>
+                  <button className={viewMode === 'table' ? 'active' : ''} onClick={() => setViewMode('table')}>Table</button>
+                </div>
+              )}
+            </div>
+
+            {isFetching ? (
+              viewMode === 'table' ? (
+                <TableSkeleton />
+              ) : (
+                <div className="reels-grid">
+                  {[1, 2, 3, 4, 5, 6].map(i => <Skeleton key={i} />)}
+                </div>
+              )
+            ) : reels.length === 0 ? (
+              <div className="glass empty-state">
+                <Sparkles size={48} className="empty-state-icon" />
+                <p>No extractions found. Input a Reel URL above to kickstart the autonomous pipeline!</p>
+              </div>
+            ) : viewMode === 'table' ? (
+              <InsightsTable
+                reels={paginatedReels}
                 onSelect={handleSelectReel}
                 formatDate={formatDate}
                 handleDelete={handleDelete}
-                checkedActions={checkedActions}
               />
-            ))}
-          </div>
-        )}
+            ) : (
+              <div className="reels-grid">
+                {paginatedReels.map((reel) => (
+                  <ReelCard
+                    key={reel.id}
+                    reel={reel}
+                    onSelect={handleSelectReel}
+                    formatDate={formatDate}
+                    handleDelete={handleDelete}
+                    checkedActions={checkedActions}
+                  />
+                ))}
+              </div>
+            )}
 
-        {/* Pagination Controls */}
-        {!isFetching && filteredReels.length > ITEMS_PER_PAGE && (
-          <div className="pagination-container glass">
-            <div className="pagination-info">
-              Showing <span className="highlight">{startIndex + 1}</span>–
-              <span className="highlight">{Math.min(endIndex, filteredReels.length)}</span> of{" "}
-              <span className="highlight">{filteredReels.length}</span> Reels
-            </div>
-            <div className="pagination-buttons">
-              <button
-                className="pagination-btn"
-                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-                disabled={currentPage === 1}
-                aria-label="Previous page"
-              >
-                <ChevronLeft size={16} />
-                <span>Prev</span>
-              </button>
-              
-              <span className="page-indicator">
-                Page <span className="highlight">{currentPage}</span> of {totalPages}
-              </span>
-              
-              <button
-                className="pagination-btn"
-                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-                disabled={currentPage === totalPages}
-                aria-label="Next page"
-              >
-                <span>Next</span>
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
-
+            {!isFetching && filteredReels.length > ITEMS_PER_PAGE && (
+              <div className="pagination-container glass">
+                <div className="pagination-info">
+                  Showing <span className="highlight">{startIndex + 1}</span>–
+                  <span className="highlight">{Math.min(endIndex, filteredReels.length)}</span> of{' '}
+                  <span className="highlight">{filteredReels.length}</span> Reels
+                </div>
+                <div className="pagination-buttons">
+                  <button
+                    className="pagination-btn"
+                    onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={currentPage === 1}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft size={16} />
+                    <span>Prev</span>
+                  </button>
+                  
+                  <span className="page-indicator">
+                    Page <span className="highlight">{currentPage}</span> of {totalPages}
+                  </span>
+                  
+                  <button
+                    className="pagination-btn"
+                    onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                    disabled={currentPage === totalPages}
+                    aria-label="Next page"
+                  >
+                    <span>Next</span>
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </main>
+      </div>
       {/* Reel Detail Modal */}
       {selectedReel && (
         <ReelModal
