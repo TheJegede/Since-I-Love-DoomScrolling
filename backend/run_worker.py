@@ -14,29 +14,26 @@ parent_env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(_
 if os.path.exists(parent_env_path):
     load_dotenv(parent_env_path)
 
-from main import worker_tick
+from datetime import datetime, timedelta, timezone
+import yt_dlp
+
+from main import WORKER_STALE_MINUTES, worker_tick
+from db import recover_stale_processing
 
 if __name__ == "__main__":
     logger.info("Standalone reels queue worker started locally.")
     
-    # Auto-update yt-dlp quietly at startup to bypass Meta/Instagram scraper blocks
-    logger.info("Checking for yt-dlp updates...")
-    try:
-        import subprocess
-        subprocess.run(
-            [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=True
-        )
-        logger.info("yt-dlp is up to date.")
-    except Exception as ue:
-        logger.warning(f"Could not auto-update yt-dlp: {str(ue)}")
-        
+    logger.info("yt-dlp version: %s", getattr(yt_dlp.version, "__version__", "unknown"))
+
     if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_KEY"):
         logger.error("SUPABASE_URL / SUPABASE_SERVICE_KEY env vars not set. Exiting.")
         sys.exit(1)
         
+    recovered = recover_stale_processing(
+        datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
+    )
+    logger.info("Recovered %s stale queue item(s).", recovered)
+
     drain_mode = "--drain" in sys.argv
     if drain_mode:
         logger.info("Running in DRAIN mode. Will exit once queue is empty.")
@@ -54,5 +51,5 @@ if __name__ == "__main__":
             logger.info("No more pending reels in queue. Exiting drain worker.")
             break
             
-        time.sleep(5.0 if did_work else 20.0)
-
+        if not did_work:
+            time.sleep(20.0)

@@ -297,7 +297,7 @@ def test_worker_tick_failure():
     orig = (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed, main.db.mark_failed_with_status)
     main.db.claim_next_pending = lambda: {"id": "row2", "url": "https://www.instagram.com/reel/F/"}
     def _boom(url):
-        raise HTTPException(status_code=500, detail="Meta blocking request")
+        raise HTTPException(status_code=400, detail="Meta blocking request")
     main.download_and_extract_audio = _boom
     
     mock_mark = lambda reel_id, error, status="failed": captured.update({"id": reel_id, "error": str(error), "status": status})
@@ -703,6 +703,103 @@ def test_api_auth_token_check():
         main.API_AUTH_TOKEN = orig_token
 
 
+
+def test_batch_terminal_statuses():
+    print("Testing all terminal and unknown batch statuses...")
+    import asyncio, main
+    original_client = main.db.get_client
+    previous = dict(main.BATCH_JOB)
+
+    class Query:
+        def select(self, *args): return self
+        def in_(self, column, values): return self
+        def execute(self):
+            return type("Result", (), {"data": [{"url": "u", "status": self.status, "error": "boom"}]})()
+
+    try:
+        for status in ("cookies_expired", "unsupported_format", "mystery"):
+            query = Query()
+            query.status = status
+            main.db.get_client = lambda q=query: type("Client", (), {"table": lambda self, name: q})()
+            main.BATCH_JOB.update({"status": "running", "urls": ["u"], "finished_at": None})
+            asyncio.run(main.update_batch_job_status())
+            assert main.BATCH_JOB["status"] == "done"
+            assert main.BATCH_JOB["failed"] == 1
+            if status == "mystery":
+                assert "Unknown queue status: mystery" in main.BATCH_JOB["errors"][0]["detail"]
+    finally:
+        main.db.get_client = original_client
+        main.BATCH_JOB.clear()
+        main.BATCH_JOB.update(previous)
+    print("[OK] terminal batch statuses passed!")
+
+
+def test_worker_retry_policy():
+    print("Testing bounded worker retry policy...")
+    import main, httpx
+    from fastapi import HTTPException
+    assert main.is_retryable_worker_error(HTTPException(status_code=429))
+    assert main.is_retryable_worker_error(HTTPException(status_code=503))
+    assert main.is_retryable_worker_error(httpx.ConnectError("offline"))
+    assert not main.is_retryable_worker_error(HTTPException(status_code=400))
+    assert not main.is_retryable_worker_error(HTTPException(status_code=403))
+    assert not main.is_retryable_worker_error(HTTPException(status_code=415))
+    assert 27 <= main.retry_delay_seconds(1, .9) <= 33
+    assert 108 <= main.retry_delay_seconds(2, .9) <= 132
+    calls = []
+    original = main.db.schedule_retry
+    main.db.schedule_retry = lambda reel_id, error, when: calls.append((reel_id, error, when))
+    try:
+        assert main._schedule_worker_retry({"id": "a", "attempt_count": 1}, "temporary")
+        assert main._schedule_worker_retry({"id": "b", "attempt_count": 2}, "temporary")
+        assert not main._schedule_worker_retry({"id": "c", "attempt_count": 3}, "temporary")
+        assert [call[0] for call in calls] == ["a", "b"]
+    finally:
+        main.db.schedule_retry = original
+    print("[OK] bounded retry policy passed!")
+
+
+def test_db_queue_metadata_contract():
+    print("Testing queue metadata data-layer contract...")
+    import db
+    from datetime import datetime, timezone
+
+    class Result:
+        def __init__(self, data): self.data = data
+    class Query:
+        def __init__(self):
+            self.calls = []
+            self.selected_rows = [{"id": "r1", "attempt_count": 1}]
+            self.updated = None
+        def select(self, *args): self.calls.append(("select", args)); return self
+        def update(self, payload): self.updated = payload; self.calls.append(("update", payload)); return self
+        def eq(self, *args): self.calls.append(("eq", args)); return self
+        def or_(self, value): self.calls.append(("or", value)); return self
+        def order(self, *args, **kwargs): return self
+        def limit(self, value): return self
+        def lt(self, *args): self.calls.append(("lt", args)); return self
+        def execute(self):
+            return Result(self.selected_rows if self.updated is None else [{"id": "r1"}])
+
+    query = Query()
+    original = db.get_client
+    db.get_client = lambda: type("Client", (), {"table": lambda self, name: query})()
+    try:
+        claimed = db.claim_next_pending()
+        assert claimed["attempt_count"] == 2
+        assert any(call[0] == "or" and "next_attempt_at.is.null" in call[1] and "next_attempt_at.lte." in call[1] for call in query.calls)
+        assert query.updated["status"] == "processing"
+        assert query.updated["processing_started_at"]
+        assert query.updated["next_attempt_at"] is None
+        query.calls.clear()
+        assert db.recover_stale_processing(datetime.now(timezone.utc)) == 1
+        assert ("eq", ("status", "processing")) in query.calls
+        assert any(call[0] == "lt" and call[1][0] == "processing_started_at" for call in query.calls)
+    finally:
+        db.get_client = original
+    print("[OK] queue metadata contract passed!")
+
+
 if __name__ == "__main__":
     print("--- Starting Transcriber Pipeline Test ---")
     test_health()
@@ -734,8 +831,8 @@ if __name__ == "__main__":
     test_worker_tick_invalid_url()
     test_download_cleanup_on_failure()
     test_api_auth_token_check()
+    test_batch_terminal_statuses()
+    test_worker_retry_policy()
+    test_db_queue_metadata_contract()
     print("--- All tests completed successfully! ---")
     sys.exit(0)
-
-
-

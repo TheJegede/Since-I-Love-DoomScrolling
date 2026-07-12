@@ -5,14 +5,16 @@ import uuid
 import threading
 import tempfile
 import logging
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from typing import List, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 import yt_dlp
-from groq import Groq
+from groq import Groq, APIConnectionError, APIStatusError
+import httpx
 from dotenv import load_dotenv
 import re
 import glob
@@ -51,6 +53,21 @@ if not GROQ_API_KEY:
 
 API_AUTH_TOKEN = os.getenv("API_AUTH_TOKEN")
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)))
+        if value <= 0:
+            raise ValueError
+        return value
+    except ValueError:
+        logger.warning("%s must be a positive integer; using %s.", name, default)
+        return default
+
+
+WORKER_STALE_MINUTES = _positive_int_env("WORKER_STALE_MINUTES", 30)
+MAX_WORKER_ATTEMPTS = 3
+
 def verify_api_key(x_api_key: Optional[str] = Header(None)):
     """Access gate: enforce token check if API_AUTH_TOKEN environment variable is set."""
     if API_AUTH_TOKEN:
@@ -70,7 +87,6 @@ def init_local_db():
         logger.info("Supabase configuration detected.")
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-
 # Initialize main database
 init_local_db()
 
@@ -83,6 +99,10 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("ENABLE_WORKER=0 — queue worker disabled.")
     else:
+        recovered = db.recover_stale_processing(
+            datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
+        )
+        logger.info("Recovered %s stale queue item(s).", recovered)
         threading.Thread(target=_worker_loop, daemon=True).start()
     yield
 
@@ -727,6 +747,8 @@ def process_pending_reel(row: dict) -> None:
         logger.info(f"Worker processed reel {reel_id} ({url})")
     except HTTPException as e:
         logger.warning(f"Worker failed reel {reel_id}: {e.detail}")
+        if is_retryable_worker_error(e) and _schedule_worker_retry(row, e.detail):
+            return
         status = "failed"
         if e.status_code == 403:
             status = "cookies_expired"
@@ -735,7 +757,36 @@ def process_pending_reel(row: dict) -> None:
         db.mark_failed_with_status(reel_id, e.detail, status)
     except Exception as e:
         logger.error(f"Worker error on reel {reel_id}: {str(e)}")
+        if is_retryable_worker_error(e) and _schedule_worker_retry(row, str(e)):
+            return
         db.mark_failed_with_status(reel_id, str(e), "failed")
+
+
+def is_retryable_worker_error(error: Exception) -> bool:
+    """Classify only known transient API and network failures as retryable."""
+    if isinstance(error, HTTPException):
+        return error.status_code == 429 or 500 <= error.status_code <= 599
+    if isinstance(error, APIStatusError):
+        return error.status_code == 429 or 500 <= error.status_code <= 599
+    return isinstance(error, (APIConnectionError, httpx.TimeoutException, httpx.NetworkError))
+
+
+def retry_delay_seconds(attempt_count: int, jitter: float | None = None) -> float:
+    """Return bounded exponential retry delay: about 30s, then about 2m."""
+    base = 30 * (4 ** max(0, attempt_count - 1))
+    factor = random.uniform(0.9, 1.1) if jitter is None else jitter
+    return base * factor
+
+
+def _schedule_worker_retry(row: dict, error: str) -> bool:
+    attempt_count = int(row.get("attempt_count") or 0)
+    if attempt_count >= MAX_WORKER_ATTEMPTS:
+        return False
+    next_attempt = datetime.now(timezone.utc) + timedelta(seconds=retry_delay_seconds(attempt_count))
+    db.schedule_retry(row["id"], error, next_attempt)
+    logger.warning("Scheduled retry %s/%s for reel %s at %s.",
+                   attempt_count + 1, MAX_WORKER_ATTEMPTS, row["id"], next_attempt.isoformat())
+    return True
 
 
 def worker_tick() -> bool:
@@ -747,7 +798,7 @@ def worker_tick() -> bool:
     return True
 
 
-def _worker_loop(poll_interval: float = 5.0, idle_interval: float = 20.0) -> None:
+def _worker_loop(idle_interval: float = 20.0) -> None:
     """Background loop: drain the queue, backing off when it's empty."""
     logger.info("Queue worker started.")
     while True:
@@ -755,8 +806,10 @@ def _worker_loop(poll_interval: float = 5.0, idle_interval: float = 20.0) -> Non
             did_work = worker_tick()
         except Exception as e:
             logger.error(f"Worker tick crashed: {str(e)}")
-            did_work = False
-        time.sleep(poll_interval if did_work else idle_interval)
+            time.sleep(idle_interval)
+            continue
+        if not did_work:
+            time.sleep(idle_interval)
 
 
 @app.post("/extract/file", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
@@ -834,6 +887,10 @@ async def extract_text(payload: dict):
     return db_record
 
 
+ACTIVE_REEL_STATUSES = frozenset({"pending", "processing"})
+SUCCESS_REEL_STATUSES = frozenset({"done"})
+FAILURE_REEL_STATUSES = frozenset({"failed", "cookies_expired", "unsupported_format"})
+
 BATCH_JOB = {
     "status": "idle",   # idle | running | done | error
     "total": 0,
@@ -881,15 +938,18 @@ async def update_batch_job_status():
             processing += 1
         else:
             status = row.get("status") or "done"
-            if status == "done":
+            if status in SUCCESS_REEL_STATUSES:
                 ok += 1
-            elif status == "failed":
+            elif status in FAILURE_REEL_STATUSES:
                 failed += 1
                 errors.append({"url": url, "detail": row.get("error") or "Unknown error"})
-            else:
+            elif status in ACTIVE_REEL_STATUSES:
                 processing += 1
                 if status == "processing":
                     current_url = url
+            else:
+                failed += 1
+                errors.append({"url": url, "detail": f"Unknown queue status: {status}"})
                 
     done = ok + failed
     BATCH_JOB.update({
@@ -1002,4 +1062,3 @@ async def get_reels_status(payload: dict):
         db_rows.extend(res.data or [])
         
     return db_rows
-

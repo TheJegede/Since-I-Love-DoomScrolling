@@ -74,7 +74,7 @@ Every processed reel produces a validated JSON payload:
 }
 ```
 
-Rows in Supabase also carry: `id` (UUID), `url`, `title`, `raw_transcript`, `post_caption`, `cluster`, `status`, `created_at`.
+Rows in Supabase also carry: `id` (UUID), `url`, `title`, `raw_transcript`, `post_caption`, `cluster`, `status`, `created_at`, `attempt_count`, `processing_started_at`, and `next_attempt_at`.
 
 ---
 
@@ -142,6 +142,7 @@ npm run dev                  # opens http://localhost:5173
 | `SUPABASE_URL` | Supabase project URL (e.g. `https://xxx.supabase.co`) |
 | `SUPABASE_SERVICE_KEY` | Supabase **service role** key (`sb_secret_…`) — never expose to browser |
 | `ENABLE_WORKER` | Set to `0` to disable the background worker thread inside FastAPI |
+| `WORKER_STALE_MINUTES` | Recover abandoned processing claims older than this many minutes on startup (default: `30`) |
 
 ### Frontend (`frontend/.env.local`)
 
@@ -183,6 +184,15 @@ WITH CHECK (
 
 -- Enable RLS
 ALTER TABLE saved_reels ENABLE ROW LEVEL SECURITY;
+
+-- Worker recovery/retry metadata (run this on existing installations)
+ALTER TABLE public.saved_reels
+  ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ;
+
+CREATE INDEX IF NOT EXISTS saved_reels_queue_ready_idx
+  ON public.saved_reels (status, next_attempt_at, created_at);
 ```
 
 ---
@@ -233,6 +243,9 @@ backend/run_local.ps1
 
 # Run standalone worker only (no HTTP server)
 python backend/run_worker.py
+
+# Explicit yt-dlp maintenance (never runs automatically at worker startup)
+.\backend\.venv\Scripts\python.exe -m pip install --upgrade yt-dlp
 
 # Run all pipeline tests (mocked — no real API keys or DB needed)
 python backend/verify_pipeline.py

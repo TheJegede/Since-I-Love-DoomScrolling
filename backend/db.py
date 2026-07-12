@@ -111,17 +111,27 @@ def claim_next_pending() -> Optional[dict]:
     return the raw row. Returns None if the queue is empty or another worker
     won the claim."""
     c = get_client()
+    now = datetime.now(timezone.utc).isoformat()
     res = (c.table(TABLE).select("*")
-           .eq("status", "pending").order("created_at").limit(1).execute())
+           .eq("status", "pending")
+           .or_(f"next_attempt_at.is.null,next_attempt_at.lte.{now}")
+           .order("created_at").limit(1).execute())
     rows = res.data or []
     if not rows:
         return None
     row = rows[0]
-    upd = (c.table(TABLE).update({"status": "processing"})
+    attempt_count = int(row.get("attempt_count") or 0) + 1
+    payload = {
+        "status": "processing",
+        "processing_started_at": now,
+        "next_attempt_at": None,
+        "attempt_count": attempt_count,
+    }
+    upd = (c.table(TABLE).update(payload)
            .eq("id", row["id"]).eq("status", "pending").execute())
     if not upd.data:
         return None  # lost the race
-    return row
+    return {**row, **payload}
 
 
 def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
@@ -134,6 +144,8 @@ def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
         "extracted_json": extracted_json,
         "status": status,
         "error": None,
+        "processing_started_at": None,
+        "next_attempt_at": None,
     }).eq("id", reel_id).execute()
 
 
@@ -142,6 +154,8 @@ def mark_failed_with_status(reel_id: str, error, status: str = "failed") -> None
     get_client().table(TABLE).update({
         "status": status,
         "error": str(error)[:500],
+        "processing_started_at": None,
+        "next_attempt_at": None,
     }).eq("id", reel_id).execute()
 
 
@@ -149,6 +163,27 @@ def mark_failed(reel_id: str, error) -> None:
     """Mark a claimed row failed, recording a truncated error message."""
     mark_failed_with_status(reel_id, error, "failed")
 
+
+def recover_stale_processing(stale_before: datetime) -> int:
+    """Return abandoned claims older than stale_before to the queue."""
+    res = (get_client().table(TABLE).update({
+        "status": "pending",
+        "error": "Recovered stale processing claim",
+        "processing_started_at": None,
+    }).eq("status", "processing")
+      .lt("processing_started_at", stale_before.astimezone(timezone.utc).isoformat())
+      .execute())
+    return len(res.data or [])
+
+
+def schedule_retry(reel_id: str, error: str, next_attempt_at: datetime) -> None:
+    """Release a claim for a future retry while preserving its attempt count."""
+    get_client().table(TABLE).update({
+        "status": "pending",
+        "error": str(error)[:500],
+        "processing_started_at": None,
+        "next_attempt_at": next_attempt_at.astimezone(timezone.utc).isoformat(),
+    }).eq("id", reel_id).execute()
 
 def cluster_counts() -> list:
     res = get_client().table(TABLE).select("cluster").execute()
