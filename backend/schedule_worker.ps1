@@ -7,8 +7,8 @@ if (-not (Test-Path $VbsPath)) {
 }
 
 # Register the task using schtasks to avoid administrative privilege requirements
-# /sc hourly /mo 1 repeats the task every hour indefinitely
-$Cmd = "schtasks /create /tn InstagramTranscriberQueueDrainer /tr `'wscript.exe `"$VbsPath`"`' /sc hourly /mo 1 /f"
+# /sc minute /mo 5 repeats the task every 5 minutes indefinitely
+$Cmd = "schtasks /create /tn InstagramTranscriberQueueDrainer /tr `'wscript.exe `"$VbsPath`"`' /sc minute /mo 5 /f"
 Invoke-Expression $Cmd
 
 Write-Host "Successfully registered scheduled task 'InstagramTranscriberQueueDrainer' using schtasks."

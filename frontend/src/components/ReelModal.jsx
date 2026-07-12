@@ -55,44 +55,78 @@ export default function ReelModal({
 
         {reel.status && reel.status !== 'done' && (
           <div className="modal-section">
-            <div className={`error-banner ${reel.status === 'cookies_expired' ? 'warning' : reel.status === 'unsupported_format' ? 'info' : 'danger'}`} style={{
-              padding: '1rem',
-              borderRadius: 'var(--radius-sm)',
-              background: reel.status === 'cookies_expired' ? 'rgba(245, 158, 11, 0.15)' : reel.status === 'unsupported_format' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-              border: `1px solid ${reel.status === 'cookies_expired' ? '#f59e0b' : reel.status === 'unsupported_format' ? '#3b82f6' : '#ef4444'}`,
-              color: 'var(--text-primary)',
-              fontSize: '0.9rem',
-              marginBottom: '1.5rem',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.5rem'
-            }}>
-              <span style={{ 
-                fontWeight: '700', 
-                color: reel.status === 'cookies_expired' ? '#f59e0b' : reel.status === 'unsupported_format' ? '#3b82f6' : '#ef4444', 
-                textTransform: 'uppercase',
-                fontSize: '0.8rem'
+            {['pending', 'processing'].includes(reel.status) ? (
+              <div className="info-banner" style={{
+                padding: '1rem',
+                borderRadius: 'var(--radius-sm)',
+                background: 'rgba(59, 130, 246, 0.1)',
+                border: '1px solid var(--accent-primary)',
+                color: 'var(--text-primary)',
+                fontSize: '0.9rem',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem'
               }}>
-                {reel.status === 'cookies_expired' ? 'Authentication Required' : reel.status === 'unsupported_format' ? 'Unsupported Format' : 'Extraction Failed'}
-              </span>
-              <p style={{ margin: 0 }}>{reel.error || 'An unknown error occurred during pipeline execution.'}</p>
-              {reel.status === 'cookies_expired' && (
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
-                  <strong>How to fix:</strong> Log into Instagram in your browser, export your session cookies to <code>cookies.txt</code> using a browser extension, and save it at <code>backend/cookies.txt</code>.
-                </div>
-              )}
-            </div>
+                <span style={{ 
+                  fontWeight: '700', 
+                  color: 'var(--accent-primary)', 
+                  textTransform: 'uppercase',
+                  fontSize: '0.8rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  {reel.status === 'processing' ? 'Processing Reel' : 'In Ingestion Queue'}
+                </span>
+                <p style={{ margin: 0 }}>
+                  {reel.status === 'processing' 
+                    ? 'The local worker is currently transcribing and extracting insights for this Reel. Please wait a moment...' 
+                    : 'This Reel is waiting in the queue to be processed. The local queue worker will pick it up shortly.'}
+                </p>
+              </div>
+            ) : (
+              <div className={`error-banner ${reel.status === 'cookies_expired' ? 'warning' : reel.status === 'unsupported_format' ? 'info' : 'danger'}`} style={{
+                padding: '1rem',
+                borderRadius: 'var(--radius-sm)',
+                background: reel.status === 'cookies_expired' ? 'rgba(245, 158, 11, 0.15)' : reel.status === 'unsupported_format' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                border: `1px solid ${reel.status === 'cookies_expired' ? '#f59e0b' : reel.status === 'unsupported_format' ? '#3b82f6' : '#ef4444'}`,
+                color: 'var(--text-primary)',
+                fontSize: '0.9rem',
+                marginBottom: '1.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem'
+              }}>
+                <span style={{ 
+                  fontWeight: '700', 
+                  color: reel.status === 'cookies_expired' ? '#f59e0b' : reel.status === 'unsupported_format' ? '#3b82f6' : '#ef4444', 
+                  textTransform: 'uppercase',
+                  fontSize: '0.8rem'
+                }}>
+                  {reel.status === 'cookies_expired' ? 'Authentication Required' : reel.status === 'unsupported_format' ? 'Unsupported Format' : 'Extraction Failed'}
+                </span>
+                <p style={{ margin: 0 }}>{reel.error || 'An unknown error occurred during pipeline execution.'}</p>
+                {reel.status === 'cookies_expired' && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                    <strong>How to fix:</strong> Log into Instagram in your browser, export your session cookies to <code>cookies.txt</code> using a browser extension, and save it at <code>backend/cookies.txt</code>.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
-        <div className="modal-section">
-          <div className="takeaway-banner">
-            <span style={{ fontWeight: '700', color: 'var(--accent-primary)', display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem', textTransform: 'uppercase' }}>
-              Core Key Takeaway
-            </span>
-            {details.key_takeaway}
+        {details.key_takeaway && (
+          <div className="modal-section">
+            <div className="takeaway-banner">
+              <span style={{ fontWeight: '700', color: 'var(--accent-primary)', display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem', textTransform: 'uppercase' }}>
+                Core Key Takeaway
+              </span>
+              {details.key_takeaway}
+            </div>
           </div>
-        </div>
+        )}
 
         {details.action_items && details.action_items.length > 0 && (
           <div className="modal-section">
