@@ -15,6 +15,19 @@ Code already substantially built — both apps exist and run. This is not a gree
 
 ## Sessions
 
+### 2026-08-24 — Queue error diagnosis, model resilience & recovery
+- Diagnosed all 20 non-done/failed rows in Supabase:
+  - 5 valid reels had previously failed due to Windows temp/path `[Errno 22]` on query-string URLs.
+  - 1 valid reel (`DcJCiNdBv07`) failed on Groq due to `qwen/qwen3.6-27b` reasoning token limit during JSON mode.
+  - 13 rows were photo carousels (no video stream); 10 legacy rows were misclassified as `failed` instead of `unsupported_format`.
+  - 1 reel (`Dbgrazri4AU`) blocked by Instagram rate limit / 400.
+- Updated `backend/main.py`:
+  - Default `GROQ_LLM_MODEL` changed to `openai/gpt-oss-120b` with fallback to `openai/gpt-oss-20b` and `qwen/qwen3.6-27b` on extraction and cluster naming failures.
+- Updated Supabase statuses:
+  - Reclassified 10 photo carousels to `unsupported_format`.
+  - Reset the 6 recoverable reels to `pending` and ran `run_worker.py --drain`.
+- Verified all 6 reels processed to `status: done` with high-quality transcripts and extracted JSON (total done rows increased from 632 to 638). All 32 pipeline tests in `verify_pipeline.py` pass.
+
 ### 2026-06-07 — iPhone Shortcut debugging + pipeline verified end-to-end
 
 **Problems found and fixed:**

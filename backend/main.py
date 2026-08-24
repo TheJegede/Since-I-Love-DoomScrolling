@@ -46,7 +46,10 @@ if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
 
 # Initialize configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "qwen/qwen3.6-27b")
+GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "openai/gpt-oss-120b")
+GROQ_LLM_FALLBACK_MODELS = [
+    m.strip() for m in os.getenv("GROQ_LLM_FALLBACK_MODELS", "openai/gpt-oss-20b,qwen/qwen3.6-27b").split(",") if m.strip()
+]
 
 # Validate configuration
 if not GROQ_API_KEY:
@@ -77,7 +80,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
 
 # Initialize data layer
 import db
-from saved_parser import parse_saved_posts
+from saved_parser import parse_saved_posts, normalize_instagram_url
 
 
 def init_local_db():
@@ -297,23 +300,32 @@ def _name_semantic_clusters(items: List[dict], labels: List[int]) -> dict:
         ensure_ascii=False,
     )
 
-    try:
-        response = groq_client.chat.completions.create(
-            model=GROQ_LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
-        )
-        data = json.loads(response.choices[0].message.content)
-        validated = ClusterNames(**data)
-    except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail="Cluster naming model returned invalid JSON.") from e
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cluster naming failed: {e}") from e
+    models_to_try = [GROQ_LLM_MODEL] + [m for m in GROQ_LLM_FALLBACK_MODELS if m != GROQ_LLM_MODEL]
+    validated = None
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            response = groq_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
+            data = json.loads(response.choices[0].message.content)
+            validated = ClusterNames(**data)
+            break
+        except json.JSONDecodeError as e:
+            logger.warning(f"Cluster naming model {model_name} returned invalid JSON: {e}")
+            last_error = e
+        except Exception as e:
+            logger.warning(f"Cluster naming model {model_name} failed: {e}")
+            last_error = e
+
+    if not validated:
+        raise HTTPException(status_code=500, detail=f"Cluster naming failed: {last_error}")
 
     names = {}
     used_names = set()
@@ -439,9 +451,9 @@ def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
 def is_valid_instagram_reel(url: str) -> bool:
     if not url:
         return False
-    # Relaxed regex pattern matching Instagram Reel, Reels plural, or post paths
-    pattern = r"^https?://(www\.)?instagram\.com/(?:reel|reels|p)/[A-Za-z0-9_\-]+/?.*$"
-    return bool(re.match(pattern, url.strip()))
+    clean_url = normalize_instagram_url(url)
+    pattern = r"^https?://(www\.)?instagram\.com/(?:reel|reels|p)/[A-Za-z0-9_\-]+/?$"
+    return bool(re.match(pattern, clean_url))
 
 def get_cookie_file() -> Optional[str]:
     """Check for cookies.txt in absolute and relative paths to bypass Instagram scraping blocks."""
@@ -466,9 +478,10 @@ def download_and_extract_audio(url: str) -> tuple[str, str, str]:
     """Download Instagram Reel and extract audio payload as MP3 using yt-dlp."""
     temp_dir = tempfile.gettempdir()
     cookie_file = get_cookie_file()
+    clean_url = normalize_instagram_url(url)
 
     # Extract Reel ID from the URL (fallback to UUID if match fails)
-    match = re.search(r"/(?:reel|reels|p)/([A-Za-z0-9_\-]+)", url)
+    match = re.search(r"/(?:reel|reels|p)/([A-Za-z0-9_\-]+)", clean_url)
     reel_id = match.group(1) if match else str(uuid.uuid4())
 
     ydl_opts = {
@@ -591,37 +604,44 @@ def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
     if caption:
         user_prompt += f"Post Caption/Description:\n{caption}\n"
 
-    logger.info(f"Sending prompt to LLM ({GROQ_LLM_MODEL})")
-    try:
-        response = groq_client.chat.completions.create(
-            model=GROQ_LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            response_format={"type": "json_object"}
-        )
-        
-        content = response.choices[0].message.content
-        logger.info(f"LLM response: {content}")
-        
-        # Parse and validate structure
-        data = json.loads(content)
-        if isinstance(data, list):
-            if len(data) > 0:
-                data = data[0]
-            else:
-                raise ValueError("LLM returned an empty JSON array.")
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected JSON object, got {type(data).__name__}")
-        validated_data = ReelExtraction(**data)
-        return validated_data
-    except json.JSONDecodeError as je:
-        logger.error(f"JSON parsing error: {str(je)}")
-        raise HTTPException(status_code=500, detail="LLM returned invalid JSON structure.")
-    except Exception as e:
-        logger.error(f"Structured extraction failed: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Structured extraction failed: {str(e)}")
+    models_to_try = [GROQ_LLM_MODEL] + [m for m in GROQ_LLM_FALLBACK_MODELS if m != GROQ_LLM_MODEL]
+    last_error = None
+
+    for model_name in models_to_try:
+        logger.info(f"Sending prompt to LLM ({model_name})")
+        try:
+            response = groq_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            
+            content = response.choices[0].message.content
+            logger.info(f"LLM response from {model_name}: {content}")
+            
+            # Parse and validate structure
+            data = json.loads(content)
+            if isinstance(data, list):
+                if len(data) > 0:
+                    data = data[0]
+                else:
+                    raise ValueError("LLM returned an empty JSON array.")
+            if not isinstance(data, dict):
+                raise ValueError(f"Expected JSON object, got {type(data).__name__}")
+            validated_data = ReelExtraction(**data)
+            return validated_data
+        except json.JSONDecodeError as je:
+            logger.warning(f"JSON parsing error from {model_name}: {str(je)}")
+            last_error = je
+        except Exception as e:
+            logger.warning(f"Structured extraction attempt on {model_name} failed: {str(e)}")
+            last_error = e
+
+    logger.error(f"All LLM extraction attempts failed. Last error: {str(last_error)}")
+    raise HTTPException(status_code=500, detail=f"Structured extraction failed: {str(last_error)}")
 
 def save_to_database(
     url: Optional[str],
@@ -822,14 +842,15 @@ def process_reel_url(url: str) -> dict:
     Returns the cached row if this URL was already processed. Raises
     HTTPException(400) on silent-hook reels (no spoken content). Used by
     /extract/url and (indirectly) the queue worker."""
-    cached = db.get_reel_by_url(url)
+    clean_url = normalize_instagram_url(url)
+    cached = db.get_reel_by_url(clean_url)
     if cached:
-        logger.info(f"Returning cached record for URL: {url}")
+        logger.info(f"Returning cached record for URL: {clean_url}")
         return cached
 
-    title, raw_transcript, post_caption, extracted = _run_pipeline(url)
+    title, raw_transcript, post_caption, extracted = _run_pipeline(clean_url)
     return save_to_database(
-        url=url,
+        url=clean_url,
         title=title,
         raw_transcript=raw_transcript,
         post_caption=post_caption,
@@ -843,9 +864,10 @@ async def extract_url(payload: dict):
     url = payload.get("url")
     if not url:
         raise HTTPException(status_code=400, detail="Missing required 'url' parameter.")
-    if not is_valid_instagram_reel(url):
+    clean_url = normalize_instagram_url(url)
+    if not is_valid_instagram_reel(clean_url):
         raise HTTPException(status_code=400, detail="Invalid Instagram Reel URL format.")
-    return process_reel_url(url)
+    return process_reel_url(clean_url)
 
 
 def process_pending_reel(row: dict) -> None:
@@ -856,12 +878,13 @@ def process_pending_reel(row: dict) -> None:
     can be retried later by resetting its status to 'pending'."""
     reel_id = row["id"]
     url = row["url"]
-    if not is_valid_instagram_reel(url):
+    clean_url = normalize_instagram_url(url)
+    if not is_valid_instagram_reel(clean_url):
         logger.warning(f"Worker rejected reel {reel_id}: Invalid URL format ({url})")
         db.mark_failed(reel_id, f"Invalid Instagram Reel URL format: {url}")
         return
     try:
-        title, raw_transcript, post_caption, extracted = _run_pipeline(url)
+        title, raw_transcript, post_caption, extracted = _run_pipeline(clean_url)
         db.update_reel_result(
             reel_id=reel_id,
             title=title,

@@ -2,6 +2,12 @@
 
 Failure log. Record bugs hit, root cause, fix. Newest first.
 
+### 2026-08-24 — /extract 400 json_validate_failed: qwen/qwen3.6-27b reasoning token limit
+**Symptom:** Reel structured extraction failed on verbose inputs with `Error code: 400 - Failed to validate JSON / Failed to generate JSON: max completion tokens reached before generating a valid document`.
+**Root cause:** `qwen/qwen3.6-27b` on Groq exhausts completion tokens on internal reasoning tokens when forced into JSON mode on longer prompts.
+**Fix (`backend/main.py`):** Updated default `GROQ_LLM_MODEL` to `openai/gpt-oss-120b` and added automatic fallback array `GROQ_LLM_FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.6-27b"]` in both `extract_structured_json` and `_name_semantic_clusters`.
+**Verified:** Re-extracted previously failed reel (`DcJCiNdBv07`) cleanly in 1.8s; all unit tests in `verify_pipeline.py` pass.
+
 ### 2026-08-23 — /extract and /clusters 500: Groq model 404 llama-3.1-8b-instant
 **Symptom:** Ingestion and clustering failed with HTTP 500 `Structured extraction failed: Error code: 404 - {'error': {'message': 'The model llama-3.1-8b-instant does not exist...', 'type': 'invalid_request_error', 'code': 'model_not_found'}}`. Worker marked reels as `failed`.
 **Root cause:** Groq removed/decommissioned `llama-3.1-8b-instant` from this tier; model name was hardcoded in `backend/main.py`.

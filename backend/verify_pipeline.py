@@ -571,8 +571,9 @@ def test_reels_status_endpoint():
 
 
 def test_url_validation_helper():
-    print("Testing is_valid_instagram_reel helper...")
+    print("Testing is_valid_instagram_reel and normalize_instagram_url helpers...")
     from main import is_valid_instagram_reel
+    from saved_parser import normalize_instagram_url
     assert is_valid_instagram_reel("https://www.instagram.com/reel/C7xY9/") is True
     assert is_valid_instagram_reel("http://instagram.com/reel/abc-123_XYZ/?query=1") is True
     assert is_valid_instagram_reel("https://instagram.com/reels/abc-123/") is True
@@ -580,7 +581,11 @@ def test_url_validation_helper():
     assert is_valid_instagram_reel("https://google.com") is False
     assert is_valid_instagram_reel("invalid-url") is False
     assert is_valid_instagram_reel("") is False
-    print("[OK] URL validation helper passed!")
+
+    assert normalize_instagram_url("https://www.instagram.com/reel/C7xY9/?igsh=123&foo=bar") == "https://www.instagram.com/reel/C7xY9/"
+    assert normalize_instagram_url("https://instagram.com/reels/abc-123?igsi=abc==") == "https://www.instagram.com/reel/abc-123/"
+    assert normalize_instagram_url("https://www.instagram.com/p/ABC123_/?img_index=2") == "https://www.instagram.com/p/ABC123_/"
+    print("[OK] URL validation and normalization helpers passed!")
 
 def test_extract_url_validation_error():
     print("Testing POST /extract/url blocks invalid URLs...")

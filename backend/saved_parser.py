@@ -1,7 +1,17 @@
-"""Pure parser for the Instagram 'Download Your Information' saved_posts.json.
+import re
+from typing import Optional
 
-No heavy dependencies — safe to import from both the FastAPI app and the CLI.
-"""
+
+def normalize_instagram_url(url: str) -> str:
+    """Strip query strings and normalize Instagram Reel/Post URLs to canonical form."""
+    if not url:
+        return ""
+    match = re.search(r"instagram\.com/(reel|reels|p)/([A-Za-z0-9_\-]+)", url.strip())
+    if match:
+        kind = "reel" if match.group(1) in ("reel", "reels") else "p"
+        return f"https://www.instagram.com/{kind}/{match.group(2)}/"
+    return url.strip().split("?")[0]
+
 
 def parse_saved_posts(data: list) -> list:
     """Return [{url, caption, title}] for every /reel/ URL in the export.
@@ -19,6 +29,7 @@ def parse_saved_posts(data: list) -> list:
                 caption = lv.get("value", "")
             elif label == "Title":
                 title = lv.get("value", "")
-        if url and "/reel/" in url:
-            items.append({"url": url, "caption": caption, "title": title})
+        if url and ("/reel/" in url or "/reels/" in url):
+            clean_url = normalize_instagram_url(url)
+            items.append({"url": clean_url, "caption": caption, "title": title})
     return items
