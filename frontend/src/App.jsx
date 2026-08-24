@@ -59,7 +59,11 @@ function computeClusters(reels) {
   }
   return Object.entries(counts)
     .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count);
+    .sort((a, b) => {
+      if (a.name === 'Unclustered') return 1;
+      if (b.name === 'Unclustered') return -1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 
@@ -256,6 +260,23 @@ export default function App() {
     }
   };
 
+
+
+  const handleRetry = async (id, e) => {
+    if (e) e.stopPropagation();
+    try {
+      const res = await fetchWithAuth(API_BASE_URL + '/reels/' + id + '/retry', { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Retry failed.');
+      }
+      const updated = { status: 'pending', error: null };
+      setReels(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
+      setSelectedReel(prev => prev && prev.id === id ? { ...prev, ...updated } : prev);
+    } catch (err) {
+      setError(err.message);
+    }
+  };
   const handleSelectReel = async (reel) => {
     // Set basic metadata first so the modal opens instantly
     setSelectedReel(reel);
@@ -729,6 +750,7 @@ export default function App() {
                     onSelect={handleSelectReel}
                     formatDate={formatDate}
                     handleDelete={handleDelete}
+                    onRetry={handleRetry}
                     checkedActions={checkedActions}
                   />
                 ))}
@@ -787,6 +809,7 @@ export default function App() {
           copiedText={copiedText}
           handleCopy={handleCopy}
           handleDelete={handleDelete}
+          onRetry={handleRetry}
         />
       )}
     </div>

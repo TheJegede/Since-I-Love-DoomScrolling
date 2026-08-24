@@ -1,6 +1,6 @@
-import { Trash2 } from 'lucide-react';
+import { RefreshCw, Trash2 } from 'lucide-react';
 
-export default function ReelCard({ reel, onSelect, formatDate, handleDelete, checkedActions = {} }) {
+export default function ReelCard({ reel, onSelect, formatDate, handleDelete, onRetry, checkedActions = {} }) {
   const details = reel.extracted_json || {};
   
   // Topic fallback
@@ -75,6 +75,15 @@ export default function ReelCard({ reel, onSelect, formatDate, handleDelete, che
         <span className="read-more-link">
           {statusText.toUpperCase()}
         </span>
+        {['failed', 'cookies_expired', 'unsupported_format'].includes(reel.status) && onRetry && (
+          <button
+            className="alt-input-btn"
+            style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+            onClick={(e) => onRetry(reel.id, e)}
+          >
+            <RefreshCw size={12} /> Retry
+          </button>
+        )}
         {reel.status === 'done' && (
           <div className="stat-item">
             <span>{completedActions}/{totalActions || 1} Check</span>

@@ -1,5 +1,5 @@
 import {
-  X, ExternalLink, Trash2, Copy, Check, FileAudio, Info, ChevronDown,
+  X, ExternalLink, RefreshCw, Trash2, Copy, Check, FileAudio, Info, ChevronDown,
 } from 'lucide-react';
 
 export default function ReelModal({
@@ -15,6 +15,7 @@ export default function ReelModal({
   copiedText,
   handleCopy,
   handleDelete,
+  onRetry,
 }) {
   const details = reel.extracted_json || {};
   return (
@@ -107,6 +108,15 @@ export default function ReelModal({
                   {reel.status === 'cookies_expired' ? 'Authentication Required' : reel.status === 'unsupported_format' ? 'Unsupported Format' : 'Extraction Failed'}
                 </span>
                 <p style={{ margin: 0 }}>{reel.error || 'An unknown error occurred during pipeline execution.'}</p>
+                {onRetry && (
+                  <button
+                    className="alt-input-btn"
+                    style={{ alignSelf: 'flex-start', fontSize: '0.8rem' }}
+                    onClick={(e) => onRetry(reel.id, e)}
+                  >
+                    <RefreshCw size={14} /> Retry extraction
+                  </button>
+                )}
                 {reel.status === 'cookies_expired' && (
                   <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
                     <strong>How to fix:</strong> Log into Instagram in your browser, export your session cookies to <code>cookies.txt</code> using a browser extension, and save it at <code>backend/cookies.txt</code>.

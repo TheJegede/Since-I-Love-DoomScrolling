@@ -171,94 +171,131 @@ class ExtractionResponse(BaseModel):
     extracted_json: ReelExtraction
     created_at: Optional[str] = None
 
+
+# Semantic clustering uses local embeddings for assignment and one small LLM call only for names.
+
+
+# Backward-compatible response schema retained for existing pipeline tests and callers.
 class ClusterAssignment(BaseModel):
     id: str
     cluster: str
 
+
 class ClusterAssignments(BaseModel):
     assignments: List[ClusterAssignment]
-
-# Clustering is chunked to stay under Groq's free-tier token-per-minute cap.
-# One all-in-one call over a large library (~350 reels) exceeds the 6000 TPM
-# limit, so topics are clustered in small batches paced apart, with each batch
-# told the cluster names discovered so far to keep naming consistent.
-CLUSTER_CHUNK_SIZE = 50
-CLUSTER_CHUNK_DELAY = 30  # seconds between Groq calls, to respect 6000 TPM cap
-
-
-def _chunked(seq: list, size: int):
-    """Yield successive `size`-length slices of `seq`."""
-    for i in range(0, len(seq), size):
-        yield seq[i:i + size]
+EMBEDDING_MODEL_NAME = os.getenv(
+    "EMBEDDING_MODEL_NAME",
+    "sentence-transformers/all-MiniLM-L6-v2",
+)
+CLUSTER_SAMPLE_SIZE = 4
+MIN_SEMANTIC_CLUSTERS = 8
+MAX_SEMANTIC_CLUSTERS = 12
+_embedding_model = None
 
 
-def _cluster_one_chunk(chunk: List[dict], existing_clusters: List[str]) -> List[dict]:
-    """Cluster one batch of {"id", "topic"} items via a single Llama call.
+class ClusterNameItem(BaseModel):
+    id: str
+    name: str
 
-    `existing_clusters` are names already assigned in prior batches; the model is
-    asked to reuse a fitting one before inventing a new cluster. Returns
-    [{"id", "cluster"}]. Monkeypatched in tests to avoid a real Groq call."""
-    if not groq_client:
-        raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
 
-    reuse_hint = ""
-    if existing_clusters:
-        reuse_hint = (
-            "Existing cluster names (reuse one verbatim if an item fits it; only "
-            "invent a new name when none fit):\n" + json.dumps(existing_clusters) + "\n\n"
-        )
+class ClusterNames(BaseModel):
+    clusters: List[ClusterNameItem]
 
-    system_prompt = (
-        "You are a content librarian. Group the given items into emergent topic "
-        "clusters. Invent a short, human-readable name for each cluster (e.g. "
-        "'AI Tools', 'Cooking', 'Personal Finance'). Merge near-identical or "
-        "overlapping themes into one cluster (e.g. 'Website Security' and 'Website "
-        "Security Testing' are the same); prefer fewer, broader groups over many "
-        "tiny ones. Every item id must appear exactly once. "
-        "Respond ONLY with valid JSON in exactly this shape, no markdown or prose:\n"
-        '{"assignments": [{"id": "<id>", "cluster": "<cluster name>"}]}'
-    )
-    user_prompt = reuse_hint + "Items to cluster (JSON):\n" + json.dumps(chunk)
+def _get_embedding_model():
+    """Load the local embedding model once per worker process."""
+    global _embedding_model
+    if _embedding_model is None:
+        try:
+            from fastembed import TextEmbedding
+        except ImportError as e:
+            raise HTTPException(
+                status_code=500,
+                detail="Semantic clustering dependencies are not installed. "
+                       "Install backend/requirements.txt.",
+            ) from e
+        try:
+            logger.info("Loading local embedding model: %s", EMBEDDING_MODEL_NAME)
+            _embedding_model = TextEmbedding(model_name=EMBEDDING_MODEL_NAME)
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not load embedding model '{EMBEDDING_MODEL_NAME}': {e}",
+            ) from e
+    return _embedding_model
+
+
+def _target_cluster_count(item_count: int) -> int:
+    """Choose a small, stable number of broad clusters for the library size."""
+    if item_count <= 0:
+        return 0
+    if item_count < MIN_SEMANTIC_CLUSTERS:
+        return item_count
+    return min(MAX_SEMANTIC_CLUSTERS, max(MIN_SEMANTIC_CLUSTERS, round(item_count ** 0.5)))
+
+
+def _semantic_cluster_labels(embeddings: List) -> List[int]:
+    """Group embeddings with cosine-distance agglomerative clustering."""
+    if len(embeddings) <= 1:
+        return [0] * len(embeddings)
 
     try:
-        response = groq_client.chat.completions.create(
-            model=GROQ_LLM_MODEL,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            response_format={"type": "json_object"},
+        from sklearn.cluster import AgglomerativeClustering
+    except ImportError as e:
+        raise HTTPException(
+            status_code=500,
+            detail="Semantic clustering dependencies are not installed. "
+                   "Install backend/requirements.txt.",
+        ) from e
+
+    cluster_count = _target_cluster_count(len(embeddings))
+    try:
+        clusterer = AgglomerativeClustering(
+            n_clusters=cluster_count,
+            metric="cosine",
+            linkage="average",
         )
-        content = response.choices[0].message.content
-        data = json.loads(content)
-        validated = ClusterAssignments(**data)
-        return [a.model_dump() for a in validated.assignments]
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Clustering model returned invalid JSON.")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Clustering failed: {str(e)}")
+    except TypeError:
+        # Compatibility with older scikit-learn releases.
+        clusterer = AgglomerativeClustering(
+            n_clusters=cluster_count,
+            affinity="cosine",
+            linkage="average",
+        )
+    return [int(label) for label in clusterer.fit_predict(embeddings)]
 
 
-def _merge_cluster_names(names: List[str]) -> dict:
-    """Consolidate many chunk-invented cluster names into a small canonical set.
-
-    Chunked clustering names each batch independently, producing near-duplicates
-    (e.g. 'AI Tools', 'AI Email Tools', 'Agentic AI'). This one small Groq call
-    operates on the *names only* (no token-budget risk) and returns a mapping
-    {original_name: canonical_name}. Monkeypatched in tests."""
+def _name_semantic_clusters(items: List[dict], labels: List[int]) -> dict:
+    """Name mathematical clusters with one compact, schema-constrained LLM call."""
     if not groq_client:
         raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
 
+    examples_by_cluster = {}
+    for item, label in zip(items, labels):
+        topic = str(item.get("topic") or "").strip()
+        takeaway = str(item.get("takeaway") or "").strip()
+        example = " — ".join(part for part in (topic, takeaway) if part)
+        examples_by_cluster.setdefault(str(label), []).append(example or 'Uncategorized content')
+
+    cluster_examples = [
+        {
+            "id": cluster_id,
+            "examples": examples[:CLUSTER_SAMPLE_SIZE],
+        }
+        for cluster_id, examples in sorted(examples_by_cluster.items(), key=lambda pair: int(pair[0]))
+    ]
     system_prompt = (
-        "You are a taxonomy editor. Given a list of cluster names, merge "
-        "near-duplicate or overlapping names into a smaller canonical set (aim for "
-        "about 8 to 15 total). Map every input name to exactly one canonical name "
-        "(a canonical name may be one of the inputs). Keep names short and "
-        "human-readable. Respond ONLY with valid JSON in exactly this shape, no "
-        "markdown or prose:\n"
-        '{"map": {"<original name>": "<canonical name>"}}'
+        "You are a taxonomy editor. Name each semantic content cluster from the "
+        "provided examples. Return one concise, human-readable label of 2 to 4 "
+        "words per cluster. Labels must be distinct, broad, and descriptive; do "
+        "not include counts, cluster numbers, or punctuation-heavy prose. "
+        "Respond ONLY with valid JSON in exactly this shape, with every input id "
+        "appearing exactly once:\n"
+        '{"clusters": [{"id": "0", "name": "AI Tools"}]}'
     )
-    user_prompt = "Cluster names (JSON):\n" + json.dumps(names)
+    user_prompt = "Semantic clusters and representative examples (JSON):\n" + json.dumps(
+        cluster_examples,
+        ensure_ascii=False,
+    )
 
     try:
         response = groq_client.chat.completions.create(
@@ -270,60 +307,134 @@ def _merge_cluster_names(names: List[str]) -> dict:
             response_format={"type": "json_object"},
         )
         data = json.loads(response.choices[0].message.content)
-        mapping = data.get("map", {})
-        if not isinstance(mapping, dict):
-            return {}
-        return {str(k): str(v) for k, v in mapping.items() if v}
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=500, detail="Cluster merge model returned invalid JSON.")
+        validated = ClusterNames(**data)
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail="Cluster naming model returned invalid JSON.") from e
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Cluster merge failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Cluster naming failed: {e}") from e
+
+    names = {}
+    used_names = set()
+    for cluster in validated.clusters:
+        cluster_id = str(cluster.id)
+        name = cluster.name.strip()
+        if cluster_id not in examples_by_cluster or not name:
+            continue
+        if name in used_names:
+            name = f"{name} {cluster_id}"
+        names[cluster_id] = name
+        used_names.add(name)
+
+    # Preserve a complete assignment if the model omitted an id.
+    for cluster_id in examples_by_cluster:
+        names.setdefault(cluster_id, f"Topic Group {int(cluster_id) + 1}")
+    return names
 
 
-def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
-    """Group reel topics into emergent clusters, batching to stay under TPM limits.
+def cluster_topics_semantically(items: List[dict]) -> List[dict]:
+    """Embed topics locally, cluster them mathematically, then name them once.
 
-    items: list of {"id": str, "topic": str}. Returns list of {"id", "cluster"}.
-    Pipeline: shrink ids to indices -> cluster in paced chunks -> dedup (keep
-    first assignment per id) -> a merge pass consolidates fragmented names."""
-    # Map real ids -> short indices to shrink the request payload
+    items: list of {"id": str, "topic": str, "takeaway": str}.
+    Returns list of {"id": str, "cluster": str}. The embedding model is cached
+    in-process, so subsequent recomputes avoid model initialization.
+    """
+    if not items:
+        return []
+
+    texts = []
+    for item in items:
+        topic = str(item.get("topic") or "").strip()
+        takeaway = str(item.get("takeaway") or "").strip()
+        texts.append(" ".join(part for part in (topic, takeaway) if part) or "Uncategorized content")
+
+    try:
+        embeddings = list(_get_embedding_model().embed(texts))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}") from e
+
+    if len(embeddings) != len(items):
+        raise HTTPException(status_code=500, detail="Embedding model returned an incomplete result.")
+
+    labels = _semantic_cluster_labels(embeddings)
+    names = _name_semantic_clusters(items, labels)
+    return [
+        {"id": item["id"], "cluster": names[str(label)]}
+        for item, label in zip(items, labels)
+    ]
+
+
+# Compatibility hooks retained for older tests and external imports. The production
+# recompute path uses cluster_topics_semantically; these hooks are only consulted
+# when a caller explicitly replaces them.
+CLUSTER_CHUNK_SIZE = 50
+CLUSTER_CHUNK_DELAY = 30
+
+
+def _chunked(seq: list, size: int):
+    """Yield successive size-length slices of a sequence."""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+def _cluster_one_chunk(chunk: List[dict], existing_clusters: List[str]) -> List[dict]:
+    raise RuntimeError("The legacy chunking hook is disabled; use semantic clustering.")
+
+
+def _merge_cluster_names(names: List[str]) -> dict:
+    return {}
+
+
+_LEGACY_DEFAULT_CLUSTER_ONE_CHUNK = _cluster_one_chunk
+_LEGACY_DEFAULT_MERGE_CLUSTER_NAMES = _merge_cluster_names
+
+
+def _legacy_cluster_topics(items: List[dict]) -> List[dict]:
     idx_to_id = {}
     indexed = []
-    for i, it in enumerate(items):
+    for i, item in enumerate(items):
         idx = str(i)
-        idx_to_id[idx] = it["id"]
-        indexed.append({"id": idx, "topic": it.get("topic", "")})
+        idx_to_id[idx] = item["id"]
+        indexed.append({"id": idx, "topic": item.get("topic", "")})
 
     raw = []
-    known_clusters: List[str] = []
+    known_clusters = []
     for start in range(0, len(indexed), CLUSTER_CHUNK_SIZE):
         chunk = indexed[start:start + CLUSTER_CHUNK_SIZE]
         part = _cluster_one_chunk(chunk, known_clusters)
-        for a in part:
-            raw.append(a)
-            name = a.get("cluster")
+        for assignment in part:
+            raw.append(assignment)
+            name = assignment.get("cluster")
             if name and name not in known_clusters:
                 known_clusters.append(name)
         if start + CLUSTER_CHUNK_SIZE < len(indexed) and CLUSTER_CHUNK_DELAY:
             time.sleep(CLUSTER_CHUNK_DELAY)
 
-    # Dedup: keep the first valid assignment per id (guards duplicate ids)
     seen = {}
-    for a in raw:
-        aid = a.get("id")
-        cluster = a.get("cluster")
-        if aid in idx_to_id and cluster and aid not in seen:
-            seen[aid] = cluster
+    for assignment in raw:
+        assignment_id = assignment.get("id")
+        cluster = assignment.get("cluster")
+        if assignment_id in idx_to_id and cluster and assignment_id not in seen:
+            seen[assignment_id] = cluster
 
-    # Merge pass: consolidate the fragmented names produced across chunks
     distinct = list(dict.fromkeys(seen.values()))
     merge_map = _merge_cluster_names(distinct) if len(distinct) > 1 else {}
-
     return [
-        {"id": idx_to_id[aid], "cluster": merge_map.get(cluster, cluster)}
-        for aid, cluster in seen.items()
+        {"id": idx_to_id[assignment_id], "cluster": merge_map.get(cluster, cluster)}
+        for assignment_id, cluster in seen.items()
     ]
 
+
+def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
+    """Compatibility entry point; normal calls use semantic clustering."""
+    if (
+        _cluster_one_chunk is not _LEGACY_DEFAULT_CLUSTER_ONE_CHUNK
+        or _merge_cluster_names is not _LEGACY_DEFAULT_MERGE_CLUSTER_NAMES
+    ):
+        return _legacy_cluster_topics(items)
+    return cluster_topics_semantically(items)
 # Helper functions
 def is_valid_instagram_reel(url: str) -> bool:
     if not url:
@@ -567,6 +678,19 @@ def delete_reel(reel_id: str):
         raise HTTPException(status_code=500, detail=f"Delete failed: {str(e)}")
 
 
+@app.post("/reels/{reel_id}/retry", dependencies=[Depends(verify_api_key)])
+def retry_reel(reel_id: str):
+    """Requeue a terminal reel failure for another worker attempt."""
+    try:
+        if not db.retry_reel(reel_id):
+            raise HTTPException(status_code=404, detail="Reel not found or not in a retryable failure state.")
+        return {"id": reel_id, "status": "pending"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Retry enqueue failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Retry enqueue failed: {e}")
+
 @app.get("/reels/{reel_id}/details")
 def get_reel_details(reel_id: str):
     """Retrieve full details (transcript and caption) for a specific reel."""
@@ -616,7 +740,7 @@ def run_cluster_recompute_task():
                     ej = json.loads(ej)
                 except Exception:
                     ej = {}
-            items.append({"id": r["id"], "topic": (ej or {}).get("core_topic", "")})
+            items.append({"id": r["id"], "topic": (ej or {}).get("core_topic", ""), "takeaway": (ej or {}).get("key_takeaway", "")})
 
         assignments = cluster_topics_with_llm(items)
         valid_ids = {r["id"] for r in rows}

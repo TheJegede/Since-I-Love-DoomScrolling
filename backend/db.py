@@ -164,6 +164,20 @@ def mark_failed(reel_id: str, error) -> None:
     mark_failed_with_status(reel_id, error, "failed")
 
 
+RETRYABLE_FAILURE_STATUSES = frozenset({"failed", "cookies_expired", "unsupported_format"})
+
+
+def retry_reel(reel_id: str) -> bool:
+    """Requeue a terminal failure and reset its retry budget."""
+    res = get_client().table(TABLE).update({
+        "status": "pending",
+        "error": None,
+        "processing_started_at": None,
+        "next_attempt_at": None,
+        "attempt_count": 0,
+    }).eq("id", reel_id).in_("status", list(RETRYABLE_FAILURE_STATUSES)).execute()
+    return bool(res.data)
+
 def recover_stale_processing(stale_before: datetime) -> int:
     """Return abandoned claims older than stale_before to the queue."""
     res = (get_client().table(TABLE).update({
