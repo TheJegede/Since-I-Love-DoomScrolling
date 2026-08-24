@@ -2,6 +2,12 @@
 
 Failure log. Record bugs hit, root cause, fix. Newest first.
 
+### 2026-08-23 — /extract and /clusters 500: Groq model 404 llama-3.1-8b-instant
+**Symptom:** Ingestion and clustering failed with HTTP 500 `Structured extraction failed: Error code: 404 - {'error': {'message': 'The model llama-3.1-8b-instant does not exist...', 'type': 'invalid_request_error', 'code': 'model_not_found'}}`. Worker marked reels as `failed`.
+**Root cause:** Groq removed/decommissioned `llama-3.1-8b-instant` from this tier; model name was hardcoded in `backend/main.py`.
+**Fix (`backend/main.py`):** Added `GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "qwen/qwen3.6-27b")` and updated `_cluster_one_chunk`, `_merge_cluster_names`, and `extract_structured_json` to use it. Reset failed reels in Supabase back to `pending`.
+**Verified:** Live extraction verified with 200 OK using Groq API; full pipeline unit test suite passed.
+
 ### 2026-06-06 — Frontend blank: lucide-react has no `Instagram` export
 **Symptom:** `localhost:5173` blank; console `SyntaxError: module .../lucide-react.js does not provide an export named 'Instagram' (App.jsx:3)`.
 **Root cause:** lucide-react (v1.17.0 installed) dropped brand icons; `Instagram` no longer exported. App.jsx imported + rendered it (lines 3, 279, 338).

@@ -46,6 +46,7 @@ if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
 
 # Initialize configuration
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_LLM_MODEL = os.getenv("GROQ_LLM_MODEL", "qwen/qwen3.6-27b")
 
 # Validate configuration
 if not GROQ_API_KEY:
@@ -221,7 +222,7 @@ def _cluster_one_chunk(chunk: List[dict], existing_clusters: List[str]) -> List[
 
     try:
         response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=GROQ_LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -261,7 +262,7 @@ def _merge_cluster_names(names: List[str]) -> dict:
 
     try:
         response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=GROQ_LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -479,10 +480,10 @@ def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
     if caption:
         user_prompt += f"Post Caption/Description:\n{caption}\n"
 
-    logger.info("Sending prompt to Llama 3.1 8B")
+    logger.info(f"Sending prompt to LLM ({GROQ_LLM_MODEL})")
     try:
         response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model=GROQ_LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
@@ -491,7 +492,7 @@ def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
         )
         
         content = response.choices[0].message.content
-        logger.info(f"Llama response: {content}")
+        logger.info(f"LLM response: {content}")
         
         # Parse and validate structure
         data = json.loads(content)
