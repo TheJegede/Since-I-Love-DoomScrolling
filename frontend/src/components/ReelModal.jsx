@@ -1,22 +1,27 @@
+import { useState } from 'react';
 import {
   X, ExternalLink, RefreshCw, Trash2, Copy, Check, FileAudio, Info, ChevronDown,
 } from 'lucide-react';
+import { formatDate } from '../formatDate';
 
 export default function ReelModal({
   reel,
   onClose,
-  formatDate,
-  isTranscriptOpen,
-  setIsTranscriptOpen,
-  isCaptionOpen,
-  setIsCaptionOpen,
   checkedActions,
   toggleCheckAction,
-  copiedText,
-  handleCopy,
   handleDelete,
   onRetry,
 }) {
+  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
+  const [isCaptionOpen, setIsCaptionOpen] = useState(false);
+  const [copiedText, setCopiedText] = useState(null); // key of the item just copied
+
+  const handleCopy = (text, key) => {
+    navigator.clipboard.writeText(text);
+    setCopiedText(key);
+    setTimeout(() => setCopiedText(null), 1500);
+  };
+
   const details = reel.extracted_json || {};
   return (
     <div className="modal-overlay" onClick={onClose}>

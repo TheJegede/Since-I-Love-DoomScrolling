@@ -21,15 +21,8 @@ function renderModal(overrides = {}) {
     <ReelModal
       reel={reel}
       onClose={noop}
-      formatDate={() => 'Jun 6, 2026'}
-      isTranscriptOpen={false}
-      setIsTranscriptOpen={noop}
-      isCaptionOpen={false}
-      setIsCaptionOpen={noop}
       checkedActions={{}}
       toggleCheckAction={noop}
-      copiedText={null}
-      handleCopy={noop}
       handleDelete={noop}
       {...overrides}
     />

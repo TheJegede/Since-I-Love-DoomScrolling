@@ -1,6 +1,7 @@
 import { RefreshCw, Trash2 } from 'lucide-react';
+import { formatDate } from '../formatDate';
 
-export default function ReelCard({ reel, onSelect, formatDate, handleDelete, onRetry, checkedActions = {} }) {
+export default function ReelCard({ reel, onSelect, handleDelete, onRetry, checkedActions = {} }) {
   const details = reel.extracted_json || {};
   
   // Topic fallback

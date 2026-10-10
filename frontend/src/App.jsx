@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { supabase, rowToRecord } from './supabaseClient';
+import { API_BASE_URL, fetchWithAuth } from './api';
 import { Skeleton, TableSkeleton } from './components/Skeletons';
 import ReelModal from './components/ReelModal';
 import InsightsTable from './components/InsightsTable';
@@ -9,13 +10,9 @@ import IngestionPanel from './components/IngestionPanel';
 import {
   Clapperboard,
   Search,
-  FileAudio, 
-  FileText, 
-  Link, 
-  X, 
-  AlertTriangle, 
+  X,
+  AlertTriangle,
   Database,
-  UploadCloud,
   Sparkles,
   ChevronLeft,
   ChevronRight,
@@ -23,33 +20,7 @@ import {
   Moon
 } from 'lucide-react';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || (window.location.hostname === 'localhost' ? 'http://localhost:8000' : '');
-
-const fetchWithAuth = async (url, options = {}) => {
-  let key = import.meta.env.VITE_API_KEY || localStorage.getItem('transcriber_api_key') || '';
-  
-  if (key) {
-    options.headers = {
-      ...options.headers,
-      'X-API-Key': key
-    };
-  }
-  
-  let res = await fetch(url, options);
-  
-  if (res.status === 401) {
-    const promptKey = prompt("This action requires a valid API Authentication Key. Please enter it:");
-    if (promptKey) {
-      localStorage.setItem('transcriber_api_key', promptKey);
-      options.headers = {
-        ...options.headers,
-        'X-API-Key': promptKey
-      };
-      res = await fetch(url, options);
-    }
-  }
-  return res;
-};
+const ITEMS_PER_PAGE = 25;
 
 // Supabase caps rows per request, so page through until the whole library is loaded.
 async function fetchAllReelRows() {
@@ -84,72 +55,29 @@ function computeClusters(reels) {
 
 
 export default function App() {
-  const [url, setUrl] = useState('');
-  const [mode, setMode] = useState('url'); // 'url', 'file', 'text'
   const [reels, setReels] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
   const [isFetching, setIsFetching] = useState(true);
   const [isWakingUp, setIsWakingUp] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const ITEMS_PER_PAGE = 25;
   const [theme, setTheme] = useState(() => localStorage.getItem('transcriber_theme') || 'dark');
+  const anyPendingRef = useRef(false);
 
   useEffect(() => {
     document.documentElement.className = theme;
     localStorage.setItem('transcriber_theme', theme);
   }, [theme]);
-  
-  // File upload states
-  const [file, setFile] = useState(null);
-  const [fileTitle, setFileTitle] = useState('');
-  const [fileCaption, setFileCaption] = useState('');
-  const fileInputRef = useRef(null);
-  const anyPendingRef = useRef(false);
 
-  // Bulk import (saved_posts.json)
-  const batchInputRef = useRef(null);
-  const [batchFile, setBatchFile] = useState(null);
-  const [batchJob, setBatchJob] = useState(null);
-  const [isBatchRunning, setIsBatchRunning] = useState(false);
-
-  // Text inputs states
-  const [textTitle, setTextTitle] = useState('');
-  const [textCaption, setTextCaption] = useState('');
-  const [textTranscript, setTextTranscript] = useState('');
-
-  // Selected reel for detail modal
   const [selectedReel, setSelectedReel] = useState(null);
-  const [isTranscriptOpen, setIsTranscriptOpen] = useState(false);
-  const [isCaptionOpen, setIsCaptionOpen] = useState(false);
   const [checkedActions, setCheckedActions] = useState({}); // { 'reelId-index': boolean }
-  const [copiedText, setCopiedText] = useState(null); // tracking tool/action copy state
 
   // Tabular view + clustering
-  const [clusters, setClusters] = useState([]);          // [{name, count}]
   const [viewMode, setViewMode] = useState('cards');      // 'cards' | 'table'
   const [clusterFilter, setClusterFilter] = useState('All');
   const [toolFilter, setToolFilter] = useState('All');
   const [sortOrder, setSortOrder] = useState('newest');   // 'newest' | 'oldest'
   const [isRecomputing, setIsRecomputing] = useState(false);
-
-  const steps = [
-    { num: 1, label: "Server Check" },
-    { num: 2, label: "Fetch Video" },
-    { num: 3, label: "Audio Extract" },
-    { num: 4, label: "Transcribe" },
-    { num: 5, label: "LLM Extract" },
-    { num: 6, label: "Save DB" }
-  ];
-
-  const ingestionTabs = [
-    { key: 'url', label: 'Reel URL', Icon: Link },
-    { key: 'file', label: 'Audio File', Icon: FileAudio },
-    { key: 'text', label: 'Transcript Text', Icon: FileText },
-    { key: 'bulk', label: 'Bulk Import', Icon: UploadCloud },
-  ];
 
   const checkBackendHealth = async () => {
     try {
@@ -169,7 +97,6 @@ export default function App() {
       if (supabase) {
         const mapped = (await fetchAllReelRows()).map(rowToRecord);
         setReels(mapped);
-        setClusters(computeClusters(mapped));
         return;
       }
       // Fallback: local FastAPI backend
@@ -177,7 +104,6 @@ export default function App() {
       if (response.ok) {
         const data = await response.json();
         setReels(data);
-        setClusters(computeClusters(data));
       }
     } catch (err) {
       console.error("Error fetching reels", err);
@@ -290,8 +216,6 @@ export default function App() {
   const handleSelectReel = async (reel) => {
     // Set basic metadata first so the modal opens instantly
     setSelectedReel(reel);
-    setIsTranscriptOpen(false);
-    setIsCaptionOpen(false);
     
     // If we already have the transcript cached locally, skip fetching
     if (reel.raw_transcript !== undefined || reel.post_caption !== undefined) {
@@ -332,224 +256,9 @@ export default function App() {
     setCurrentPage(1);
   };
 
-  const handleUrlSubmit = async (e) => {
-    e.preventDefault();
-    if (!url.trim()) return;
-
-    setError(null);
-    setIsLoading(true);
-    setCurrentStep(1);
-
-    // Simulate progress updates for visual clarity (FastAPI executes quickly, but scraping takes a few seconds)
-    const stepIntervals = [
-      { step: 1, delay: 0 },
-      { step: 2, delay: 800 },
-      { step: 3, delay: 4500 },
-      { step: 4, delay: 6500 },
-      { step: 5, delay: 8500 },
-      { step: 6, delay: 10000 }
-    ];
-
-    const progressTimers = stepIntervals.map(({ step, delay }) => {
-      return setTimeout(() => setCurrentStep(step), delay);
-    });
-
-    try {
-      const response = await fetchWithAuth(`${API_BASE_URL}/extract/url`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() })
-      });
-
-      progressTimers.forEach(clearTimeout);
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || "Pipeline failed during extraction.");
-      }
-
-      setCurrentStep(6);
-      const data = await response.json();
-      
-      // Update local reels list and open the new modal
-      setReels(prev => [data, ...prev.filter(r => r.url !== data.url)]);
-      setSelectedReel(data);
-      setUrl('');
-      
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleFileDrop = (e) => {
-    e.preventDefault();
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.type.startsWith('audio/')) {
-      setFile(droppedFile);
-    } else {
-      setError("Please drop a valid audio file.");
-    }
-  };
-
-  const handleFileSelect = (e) => {
-    const selected = e.target.files[0];
-    if (selected) setFile(selected);
-  };
-
-  const handleFileSubmit = async (e) => {
-    e.preventDefault();
-    if (!file) return;
-
-    setError(null);
-    setIsLoading(true);
-    setCurrentStep(3); // Skip scraping and start at audio stage
-
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', fileTitle || file.name);
-    formData.append('caption', fileCaption);
-
-    try {
-      setCurrentStep(4); // Transcribe
-      const response = await fetchWithAuth(`${API_BASE_URL}/extract/file`, {
-        method: 'POST',
-        body: formData
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || "Failed to process audio file.");
-      }
-
-      setCurrentStep(5); // Structure
-      const data = await response.json();
-      
-      setCurrentStep(6);
-      setReels(prev => [data, ...prev]);
-      setSelectedReel(data);
-      setFile(null);
-      setFileTitle('');
-      setFileCaption('');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleTextSubmit = async (e) => {
-    e.preventDefault();
-    if (!textTranscript.trim() && !textCaption.trim()) {
-      setError("Please provide either a transcript or a description caption.");
-      return;
-    }
-
-    setError(null);
-    setIsLoading(true);
-    setCurrentStep(5); // Jump straight to LLM extraction
-
-    try {
-      const response = await fetchWithAuth(`${API_BASE_URL}/extract/text`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: textTitle || "Manual Text Input",
-          transcript: textTranscript,
-          caption: textCaption
-        })
-      });
-
-      if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.detail || "Failed to extract from text.");
-      }
-
-      setCurrentStep(6);
-      const data = await response.json();
-      setReels(prev => [data, ...prev]);
-      setSelectedReel(data);
-      setTextTitle('');
-      setTextCaption('');
-      setTextTranscript('');
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleBatchSelect = (e) => {
-    const selected = e.target.files[0];
-    if (selected) setBatchFile(selected);
-  };
-
-  const handleBatchDrop = (e) => {
-    e.preventDefault();
-    const droppedFile = e.dataTransfer.files[0];
-    if (droppedFile && droppedFile.name.toLowerCase().endsWith('.json')) {
-      setBatchFile(droppedFile);
-    } else {
-      setError("Please drop your saved_posts.json file.");
-    }
-  };
-
-  const pollBatchStatus = async () => {
-    try {
-      const res = await fetchWithAuth(`${API_BASE_URL}/extract/batch/status`);
-      if (!res.ok) return;
-      const job = await res.json();
-      setBatchJob(job);
-      if (job.status !== 'running') {
-        setIsBatchRunning(false);
-        fetchReels();
-      }
-    } catch (err) {
-      console.error("Error polling batch status", err);
-    }
-  };
-
-  const handleBatchSubmit = async (e) => {
-    e.preventDefault();
-    if (!batchFile) return;
-    setError(null);
-    setIsLoading(true);
-    const formData = new FormData();
-    formData.append('file', batchFile);
-    try {
-      const res = await fetchWithAuth(`${API_BASE_URL}/extract/batch`, { method: 'POST', body: formData });
-      if (res.status === 409) {
-        // a job is already running — attach to it
-        setIsBatchRunning(true);
-        setIsLoading(false);
-        return;
-      }
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to start batch import.');
-      }
-      setIsBatchRunning(true);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (!isBatchRunning) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    pollBatchStatus();
-    const id = setInterval(pollBatchStatus, 3000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBatchRunning]);
-
-  const handleCopy = (text, key) => {
-    navigator.clipboard.writeText(text);
-    setCopiedText(key);
-    setTimeout(() => setCopiedText(null), 1500);
+  const handleIngested = (record) => {
+    setReels(prev => [record, ...prev.filter(r => !record.url || r.url !== record.url)]);
+    setSelectedReel(record);
   };
 
   const toggleCheckAction = (reelId, index) => {
@@ -560,16 +269,7 @@ export default function App() {
     }));
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric'
-    });
-  };
-
+  const clusters = computeClusters(reels);
   const allTools = Array.from(
     new Set(reels.flatMap(r => r.extracted_json?.tools_or_resources || []))
   ).sort();
@@ -708,18 +408,7 @@ export default function App() {
             </div>
           )}
 
-          <IngestionPanel
-            mode={mode} setMode={setMode} ingestionTabs={ingestionTabs} isLoading={isLoading}
-            url={url} setUrl={setUrl} handleUrlSubmit={handleUrlSubmit}
-            file={file} setFile={setFile} fileTitle={fileTitle} setFileTitle={setFileTitle}
-            fileCaption={fileCaption} setFileCaption={setFileCaption} fileInputRef={fileInputRef}
-            handleFileDrop={handleFileDrop} handleFileSelect={handleFileSelect} handleFileSubmit={handleFileSubmit}
-            textTitle={textTitle} setTextTitle={setTextTitle} textCaption={textCaption} setTextCaption={setTextCaption}
-            textTranscript={textTranscript} setTextTranscript={setTextTranscript} handleTextSubmit={handleTextSubmit}
-            batchFile={batchFile} batchInputRef={batchInputRef} handleBatchSelect={handleBatchSelect}
-            handleBatchDrop={handleBatchDrop} handleBatchSubmit={handleBatchSubmit} isBatchRunning={isBatchRunning} batchJob={batchJob}
-            currentStep={currentStep} steps={steps}
-          />
+          <IngestionPanel onIngested={handleIngested} onError={setError} onBatchFinished={fetchReels} />
 
           <section className="insights-section">
             <div className="dashboard-controls">
@@ -758,7 +447,6 @@ export default function App() {
               <InsightsTable
                 reels={paginatedReels}
                 onSelect={handleSelectReel}
-                formatDate={formatDate}
                 handleDelete={handleDelete}
               />
             ) : (
@@ -768,7 +456,6 @@ export default function App() {
                     key={reel.id}
                     reel={reel}
                     onSelect={handleSelectReel}
-                    formatDate={formatDate}
                     handleDelete={handleDelete}
                     onRetry={handleRetry}
                     checkedActions={checkedActions}
@@ -817,17 +504,11 @@ export default function App() {
       {/* Reel Detail Modal */}
       {selectedReel && (
         <ReelModal
+          key={selectedReel.id}
           reel={selectedReel}
           onClose={() => setSelectedReel(null)}
-          formatDate={formatDate}
-          isTranscriptOpen={isTranscriptOpen}
-          setIsTranscriptOpen={setIsTranscriptOpen}
-          isCaptionOpen={isCaptionOpen}
-          setIsCaptionOpen={setIsCaptionOpen}
           checkedActions={checkedActions}
           toggleCheckAction={toggleCheckAction}
-          copiedText={copiedText}
-          handleCopy={handleCopy}
           handleDelete={handleDelete}
           onRetry={handleRetry}
         />

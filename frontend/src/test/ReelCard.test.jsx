@@ -15,7 +15,7 @@ const pendingReel = { id: 'r2', title: 'Queued Reel', status: 'processing', url:
 describe('ReelCard', () => {
   it('renders a full card for done reels and fires onSelect', () => {
     const onSelect = vi.fn();
-    render(<ReelCard reel={doneReel} onSelect={onSelect} formatDate={() => 'Jun 6'} handleDelete={() => {}} />);
+    render(<ReelCard reel={doneReel} onSelect={onSelect} handleDelete={() => {}} />);
     expect(screen.getByText('Done Reel')).toBeInTheDocument();
     expect(screen.getByText('0/2 Check')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Done Reel'));
@@ -23,7 +23,7 @@ describe('ReelCard', () => {
   });
 
   it('renders a status placeholder for non-done reels', () => {
-    render(<ReelCard reel={pendingReel} onSelect={() => {}} formatDate={() => ''} handleDelete={() => {}} />);
+    render(<ReelCard reel={pendingReel} onSelect={() => {}} handleDelete={() => {}} />);
     expect(screen.getByText('PROCESSING →')).toBeInTheDocument();
     expect(screen.getByText('Queued Reel')).toBeInTheDocument();
   });

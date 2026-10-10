@@ -1,6 +1,7 @@
 import { Trash2 } from 'lucide-react';
+import { formatDate } from '../formatDate';
 
-export default function InsightsTable({ reels, onSelect, formatDate, handleDelete }) {
+export default function InsightsTable({ reels, onSelect, handleDelete }) {
   return (
     <div className="table-scroll">
       <table className="insights-table glass">

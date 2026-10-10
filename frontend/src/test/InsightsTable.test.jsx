@@ -14,7 +14,7 @@ const reels = [
 
 describe('InsightsTable', () => {
   it('renders a row per reel with topic, cluster and tools', () => {
-    render(<InsightsTable reels={reels} onSelect={() => {}} formatDate={() => 'Jun 6'} handleDelete={() => {}} />);
+    render(<InsightsTable reels={reels} onSelect={() => {}} handleDelete={() => {}} />);
     expect(screen.getByText('Topic A')).toBeInTheDocument();
     expect(screen.getByText('AI Tools')).toBeInTheDocument();
     expect(screen.getByText('Groq')).toBeInTheDocument();
@@ -22,7 +22,7 @@ describe('InsightsTable', () => {
 
   it('calls onSelect when a row is clicked', () => {
     const onSelect = vi.fn();
-    render(<InsightsTable reels={reels} onSelect={onSelect} formatDate={() => 'Jun 6'} handleDelete={() => {}} />);
+    render(<InsightsTable reels={reels} onSelect={onSelect} handleDelete={() => {}} />);
     fireEvent.click(screen.getByText('Topic A'));
     expect(onSelect).toHaveBeenCalledWith(reels[0]);
   });

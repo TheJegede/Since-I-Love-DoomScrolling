@@ -1,28 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { createRef } from 'react';
-import { Link, FileAudio, FileText, UploadCloud } from 'lucide-react';
 import IngestionPanel from '../components/IngestionPanel';
 
-const tabs = [
-  { key: 'url', label: 'Reel URL', Icon: Link },
-  { key: 'file', label: 'Audio File', Icon: FileAudio },
-  { key: 'text', label: 'Transcript Text', Icon: FileText },
-  { key: 'bulk', label: 'Bulk Import', Icon: UploadCloud },
-];
-
-const baseProps = {
-  mode: 'url', setMode: vi.fn(), ingestionTabs: tabs, isLoading: false,
-  url: '', setUrl: vi.fn(), handleUrlSubmit: vi.fn((e) => e.preventDefault()),
-  file: null, setFile: vi.fn(), fileTitle: '', setFileTitle: vi.fn(),
-  fileCaption: '', setFileCaption: vi.fn(), fileInputRef: createRef(),
-  handleFileDrop: vi.fn(), handleFileSelect: vi.fn(), handleFileSubmit: vi.fn(),
-  textTitle: '', setTextTitle: vi.fn(), textCaption: '', setTextCaption: vi.fn(),
-  textTranscript: '', setTextTranscript: vi.fn(), handleTextSubmit: vi.fn(),
-  batchFile: null, batchInputRef: createRef(), handleBatchSelect: vi.fn(),
-  handleBatchDrop: vi.fn(), handleBatchSubmit: vi.fn(), isBatchRunning: false, batchJob: null,
-  currentStep: 1, steps: [{ num: 1, label: 'Server Check' }],
-};
+const baseProps = { onIngested: vi.fn(), onError: vi.fn(), onBatchFinished: vi.fn() };
 
 describe('IngestionPanel', () => {
   it('renders all four mode tabs', () => {
@@ -32,10 +12,9 @@ describe('IngestionPanel', () => {
   });
 
   it('switches mode when a tab is clicked', () => {
-    const setMode = vi.fn();
-    render(<IngestionPanel {...baseProps} setMode={setMode} />);
+    render(<IngestionPanel {...baseProps} />);
     fireEvent.click(screen.getByText(/Audio File/i));
-    expect(setMode).toHaveBeenCalledWith('file');
+    expect(screen.getByText(/Drag & drop audio file/i)).toBeInTheDocument();
   });
 
   it('shows the URL input in url mode', () => {
