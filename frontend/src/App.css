@@ -227,6 +227,29 @@ textarea::placeholder {
   flex-shrink: 0;
 }
 
+.search-status {
+  margin: 0.45rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  line-height: 1.35;
+}
+
+.search-status--error {
+  color: var(--accent-warning);
+}
+
+.search-status-retry {
+  margin-left: 0.4rem;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: var(--accent-primary);
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 .workspace-rail select {
   width: 100%;
   padding: 0.65rem 2rem 0.65rem 0.75rem;
@@ -524,6 +547,23 @@ textarea:focus {
 
 .card-topic-badge {
   color: var(--text-primary);
+}
+
+.related-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px dashed var(--accent-primary);
+  border-radius: var(--radius-sm);
+  color: var(--accent-primary);
+  padding: 0.22rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  line-height: 1.2;
+}
+
+.insights-table .related-badge {
+  margin-left: 0.4rem;
 }
 
 .card-date,

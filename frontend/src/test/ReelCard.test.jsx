@@ -27,4 +27,11 @@ describe('ReelCard', () => {
     expect(screen.getByText('PROCESSING →')).toBeInTheDocument();
     expect(screen.getByText('Queued Reel')).toBeInTheDocument();
   });
+
+  it('shows a Related tag only for meaning matches', () => {
+    const { rerender } = render(<ReelCard reel={doneReel} onSelect={() => {}} handleDelete={() => {}} />);
+    expect(screen.queryByText('Related')).toBeNull();
+    rerender(<ReelCard reel={doneReel} related onSelect={() => {}} handleDelete={() => {}} />);
+    expect(screen.getByText('Related')).toBeInTheDocument();
+  });
 });

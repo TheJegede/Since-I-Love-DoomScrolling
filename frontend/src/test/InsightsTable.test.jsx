@@ -26,4 +26,11 @@ describe('InsightsTable', () => {
     fireEvent.click(screen.getByText('Topic A'));
     expect(onSelect).toHaveBeenCalledWith(reels[0]);
   });
+
+  it('shows a Related tag only for meaning matches', () => {
+    const { rerender } = render(<InsightsTable reels={reels} onSelect={() => {}} handleDelete={() => {}} />);
+    expect(screen.queryByText('Related')).toBeNull();
+    rerender(<InsightsTable reels={reels} relatedIds={new Set(['r1'])} onSelect={() => {}} handleDelete={() => {}} />);
+    expect(screen.getByText('Related')).toBeInTheDocument();
+  });
 });

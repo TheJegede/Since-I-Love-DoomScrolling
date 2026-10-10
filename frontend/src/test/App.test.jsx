@@ -174,4 +174,30 @@ describe('App baseline', () => {
     await screen.findByText('Reel Title 0');
     expect(screen.queryByText('Reel Title 25')).toBeNull();
   });
+
+  it('searches by exact words without Supabase and shows no smart-search status', async () => {
+    const mockReels = ['Comedy writing', 'AI tools'].map((topic, i) => ({
+      id: `reel_${i}`,
+      title: `Reel Title ${i}`,
+      url: `https://instagram.com/reel/abc_${i}/`,
+      extracted_json: { core_topic: topic, key_takeaway: '', action_items: [], tools_or_resources: [] },
+      created_at: new Date(2026, 5, 20 - i).toISOString(),
+      cluster: 'Unclustered',
+      status: 'done'
+    }));
+    globalThis.fetch = vi.fn((input) => {
+      const u = String(input);
+      if (u.endsWith('/health')) return Promise.resolve({ ok: true });
+      if (u.includes('/reels')) return Promise.resolve({ ok: true, json: () => Promise.resolve(mockReels) });
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
+    });
+
+    render(<App />);
+    await screen.findByText('Reel Title 0');
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'comedy' } });
+
+    expect(screen.getByText('Reel Title 0')).toBeInTheDocument();
+    expect(screen.queryByText('Reel Title 1')).toBeNull();
+    expect(screen.queryByText(/Smart search/)).toBeNull();
+  });
 });

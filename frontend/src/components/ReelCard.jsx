@@ -1,7 +1,7 @@
 import { RefreshCw, Trash2 } from 'lucide-react';
 import { formatDate } from '../formatDate';
 
-export default function ReelCard({ reel, onSelect, handleDelete, onRetry, checkedActions = {} }) {
+export default function ReelCard({ reel, onSelect, handleDelete, onRetry, checkedActions = {}, related = false }) {
   const details = reel.extracted_json || {};
   
   // Topic fallback
@@ -39,6 +39,7 @@ export default function ReelCard({ reel, onSelect, handleDelete, onRetry, checke
         <div className="card-badges">
           <span className="card-topic-badge">{topic.toUpperCase()}</span>
           {mainTool && <span className="card-tool-badge">{mainTool}</span>}
+          {related && <span className="related-badge">Related</span>}
         </div>
         <div className="card-meta">
           <span className="card-date">{formatDate(reel.created_at)}</span>

@@ -7,6 +7,7 @@ import ReelModal from './components/ReelModal';
 import InsightsTable from './components/InsightsTable';
 import ReelCard from './components/ReelCard';
 import IngestionPanel from './components/IngestionPanel';
+import { rankReels, useSemanticSearch } from './semanticSearch';
 import {
   Clapperboard,
   Search,
@@ -78,6 +79,7 @@ export default function App() {
   const [toolFilter, setToolFilter] = useState('All');
   const [sortOrder, setSortOrder] = useState('newest');   // 'newest' | 'oldest'
   const [isRecomputing, setIsRecomputing] = useState(false);
+  const smartSearch = useSemanticSearch(searchQuery);
 
   const checkBackendHealth = async () => {
     try {
@@ -274,23 +276,16 @@ export default function App() {
     new Set(reels.flatMap(r => r.extracted_json?.tools_or_resources || []))
   ).sort();
 
-  const filteredReels = reels
+  const isSearching = Boolean(searchQuery.trim());
+  const dateSortedReels = reels
     .filter(r => clusterFilter === 'All' || (r.cluster || 'Unclustered') === clusterFilter)
     .filter(r => toolFilter === 'All' || (r.extracted_json?.tools_or_resources || []).includes(toolFilter))
-    .filter(r => {
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      const ej = r.extracted_json || {};
-      const hay = [
-        r.title, r.raw_transcript, r.post_caption, ej.core_topic, ej.key_takeaway,
-        ...(ej.tools_or_resources || []), ...(ej.action_items || [])
-      ].filter(Boolean).join(' ').toLowerCase();
-      return hay.includes(q);
-    })
     .sort((a, b) => {
       const da = new Date(a.created_at || 0), db = new Date(b.created_at || 0);
       return sortOrder === 'newest' ? db - da : da - db;
     });
+  // While searching: exact-word matches first, then meaning matches by closeness.
+  const { reels: filteredReels, relatedIds } = rankReels(dateSortedReels, searchQuery, smartSearch.scores);
 
   const totalPages = Math.ceil(filteredReels.length / ITEMS_PER_PAGE) || 1;
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -350,6 +345,17 @@ export default function App() {
                 onChange={handleSearchChange}
               />
             </div>
+            {smartSearch.status === 'loading' && (
+              <p className="search-status" role="status">
+                Smart search loading… showing exact matches for now
+              </p>
+            )}
+            {smartSearch.status === 'error' && (
+              <p className="search-status search-status--error" role="status">
+                Smart search unavailable — showing exact matches only
+                <button type="button" className="search-status-retry" onClick={smartSearch.retry}>Retry</button>
+              </p>
+            )}
           </div>
 
           {reels.length > 0 && (
@@ -374,7 +380,13 @@ export default function App() {
 
               <div className="control-group">
                 <label className="control-label" htmlFor="sort-order">Order by date</label>
-                <select id="sort-order" value={sortOrder} onChange={e => { setSortOrder(e.target.value); setCurrentPage(1); }}>
+                <select
+                  id="sort-order"
+                  value={sortOrder}
+                  disabled={isSearching}
+                  title={isSearching ? 'Search results are ordered by best match' : undefined}
+                  onChange={e => { setSortOrder(e.target.value); setCurrentPage(1); }}
+                >
                   <option value="newest">Newest first</option>
                   <option value="oldest">Oldest first</option>
                 </select>
@@ -447,6 +459,7 @@ export default function App() {
             ) : viewMode === 'table' ? (
               <InsightsTable
                 reels={paginatedReels}
+                relatedIds={relatedIds}
                 onSelect={handleSelectReel}
                 handleDelete={handleDelete}
               />
@@ -456,6 +469,7 @@ export default function App() {
                   <ReelCard
                     key={reel.id}
                     reel={reel}
+                    related={relatedIds.has(reel.id)}
                     onSelect={handleSelectReel}
                     handleDelete={handleDelete}
                     onRetry={handleRetry}

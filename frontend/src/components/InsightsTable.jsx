@@ -1,7 +1,7 @@
 import { Trash2 } from 'lucide-react';
 import { formatDate } from '../formatDate';
 
-export default function InsightsTable({ reels, onSelect, handleDelete }) {
+export default function InsightsTable({ reels, onSelect, handleDelete, relatedIds = new Set() }) {
   return (
     <div className="table-scroll">
       <table className="insights-table glass">
@@ -15,7 +15,10 @@ export default function InsightsTable({ reels, onSelect, handleDelete }) {
             const ej = reel.extracted_json || {};
             return (
               <tr key={reel.id} onClick={() => onSelect(reel)}>
-                <td>{ej.core_topic || reel.title}</td>
+                <td>
+                  {ej.core_topic || reel.title}
+                  {relatedIds.has(reel.id) && <span className="related-badge">Related</span>}
+                </td>
                 <td><span className="cluster-pill">{reel.cluster || 'Unclustered'}</span></td>
                 <td>{ej.key_takeaway}</td>
                 <td>{(ej.tools_or_resources || []).map((t, i) => (
