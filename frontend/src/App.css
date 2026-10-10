@@ -114,6 +114,10 @@
   color: var(--accent-success);
 }
 
+.status-dot.waking {
+  color: var(--accent-warning);
+}
+
 .workspace-layout {
   display: grid;
   grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
@@ -415,46 +419,6 @@ textarea:focus {
   color: var(--text-secondary);
   font-size: 0.9rem;
   font-weight: 700;
-}
-
-.step-tracker {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.5rem;
-  margin-top: 1rem;
-}
-
-.step {
-  color: var(--text-muted);
-  opacity: 1;
-}
-
-.step-node {
-  width: 30px;
-  height: 30px;
-  margin-bottom: 0.45rem;
-  border-radius: 50%;
-  background: var(--bg-card);
-  border: 1px solid var(--glass-border);
-}
-
-.step.active .step-node {
-  border-color: var(--accent-warning);
-  color: var(--accent-warning);
-}
-
-.step.completed {
-  color: var(--accent-success);
-}
-
-.step.completed .step-node {
-  border-color: var(--accent-success);
-  color: var(--accent-success);
-}
-
-.step-label {
-  font-size: 0.72rem;
-  line-height: 1.2;
 }
 
 .insights-section {
@@ -1136,9 +1100,6 @@ textarea:focus {
     flex: 1;
   }
 
-  .step-tracker {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1176,7 +1137,15 @@ textarea:focus {
 .ingestion-panel .batch-progress-fill { height: 100%; background: var(--accent-primary); transition: width 0.4s ease; }
 .ingestion-panel .batch-progress-status { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.5rem; }
 .ingestion-panel .batch-progress-current { font-size: 0.75rem; color: var(--text-muted); word-break: break-all; }
-.ingestion-panel .progress-stage { color: var(--accent-primary); }
+/* Sit under the form (last column), not under the tab list */
+.ingestion-panel .progress-container { grid-column: -2 / -1; margin-top: 0; }
+.ingestion-panel .ingest-progress-track { height: 4px; background: var(--accent-secondary); border-radius: 2px; overflow: hidden; }
+.ingestion-panel .ingest-progress-fill {
+  height: 100%;
+  background-image: linear-gradient(90deg, var(--accent-primary) 25%, var(--accent-secondary) 50%, var(--accent-primary) 75%);
+  background-size: 200% 100%;
+  animation: card-shimmer 1.5s infinite linear;
+}
 
 .modal-content .modal-topic-badge { font-size: 0.8rem; padding: 0.35rem 0.85rem; }
 .modal-content .modal-processed-on { font-size: 0.85rem; color: var(--text-muted); }

@@ -142,69 +142,6 @@ body {
   justify-content: space-between;
 }
 
-.step-tracker {
-  position: relative;
-}
-
-.step {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  text-align: center;
-  transition: var(--transition-smooth);
-  position: relative;
-  z-index: 2;
-}
-
-.step.active {
-  opacity: 1;
-}
-
-.step.completed {
-  opacity: 0.9;
-}
-
-.step-node {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  font-weight: 700;
-  transition: var(--transition-smooth);
-  position: relative;
-}
-
-.step.active .step-node {
-  background: var(--bg-input);
-}
-
-.step.active .step-node::after {
-  content: '';
-  position: absolute;
-  top: -4px;
-  left: -4px;
-  right: -4px;
-  bottom: -4px;
-  border-radius: 50%;
-  border: 1px solid var(--accent-primary);
-  opacity: 0.4;
-  animation: step-pulse 1.5s infinite ease-in-out;
-}
-
-@keyframes step-pulse {
-  0% { transform: scale(1); opacity: 0.4; }
-  50% { transform: scale(1.15); opacity: 0.15; }
-  100% { transform: scale(1); opacity: 0.4; }
-}
-
-.step.completed .step-node {
-  background: var(--bg-input);
-}
-
-.step-label {
-  font-weight: 500;
-}
-
 /* Dashboard Filter */
 .dashboard-controls {
   padding-bottom: 1.25rem;

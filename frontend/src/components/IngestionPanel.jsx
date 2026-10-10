@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  Clapperboard, UploadCloud, Check, FileAudio, FileText, Link,
+  Clapperboard, UploadCloud, FileAudio, FileText, Link,
 } from 'lucide-react';
 import { API_BASE_URL, fetchWithAuth } from '../api';
 
@@ -11,24 +11,13 @@ const INGESTION_TABS = [
   { key: 'bulk', label: 'Bulk Import', Icon: UploadCloud },
 ];
 
-const STEPS = [
-  { num: 1, label: "Server Check" },
-  { num: 2, label: "Fetch Video" },
-  { num: 3, label: "Audio Extract" },
-  { num: 4, label: "Transcribe" },
-  { num: 5, label: "LLM Extract" },
-  { num: 6, label: "Save DB" }
-];
-
-// Simulated stage timings for the URL pipeline: the backend reports no progress.
-const URL_STEP_DELAYS = [
-  { step: 1, delay: 0 },
-  { step: 2, delay: 800 },
-  { step: 3, delay: 4500 },
-  { step: 4, delay: 6500 },
-  { step: 5, delay: 8500 },
-  { step: 6, delay: 10000 }
-];
+// The backend reports no progress, so say what is happening instead of faking stages.
+const LOADING_LABELS = {
+  url: 'Downloading, transcribing and extracting. This usually takes under a minute.',
+  file: 'Transcribing and extracting insights...',
+  text: 'Extracting insights...',
+  bulk: 'Uploading saved_posts.json...',
+};
 
 // POST to an /extract endpoint and return the saved record.
 async function postExtract(path, options, fallbackMessage) {
@@ -43,7 +32,6 @@ async function postExtract(path, options, fallbackMessage) {
 export default function IngestionPanel({ onIngested, onError, onBatchFinished }) {
   const [mode, setMode] = useState('url'); // 'url', 'file', 'text', 'bulk'
   const [isLoading, setIsLoading] = useState(false);
-  const [currentStep, setCurrentStep] = useState(1);
 
   const [url, setUrl] = useState('');
 
@@ -70,8 +58,6 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
 
     onError(null);
     setIsLoading(true);
-    setCurrentStep(1);
-    const progressTimers = URL_STEP_DELAYS.map(({ step, delay }) => setTimeout(() => setCurrentStep(step), delay));
 
     try {
       const record = await postExtract('/extract/url', {
@@ -83,7 +69,6 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
     } catch (err) {
       onError(err.message);
     } finally {
-      progressTimers.forEach(clearTimeout);
       setIsLoading(false);
     }
   };
@@ -109,7 +94,6 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
 
     onError(null);
     setIsLoading(true);
-    setCurrentStep(4); // Skip scraping: straight to transcription
 
     const formData = new FormData();
     formData.append('file', file);
@@ -138,7 +122,6 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
 
     onError(null);
     setIsLoading(true);
-    setCurrentStep(5); // Jump straight to LLM extraction
 
     try {
       const record = await postExtract('/extract/text', {
@@ -391,25 +374,13 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
         </form>
       )}
 
-      {/* Progress Timeline Tracker */}
       {isLoading && (
         <div className="progress-container">
           <div className="progress-header">
-            <span>Pipeline Stage Executing:</span>
-            <span className="progress-stage">Stage {currentStep} of 6</span>
+            <span>{LOADING_LABELS[mode]}</span>
           </div>
-          <div className="step-tracker">
-            {STEPS.map((s) => (
-              <div 
-                key={s.num} 
-                className={`step ${currentStep === s.num ? 'active' : ''} ${currentStep > s.num ? 'completed' : ''}`}
-              >
-                <div className="step-node">
-                  {currentStep > s.num ? <Check size={16} /> : s.num}
-                </div>
-                <span className="step-label">{s.label}</span>
-              </div>
-            ))}
+          <div className="ingest-progress-track">
+            <div className="ingest-progress-fill"></div>
           </div>
         </div>
       )}

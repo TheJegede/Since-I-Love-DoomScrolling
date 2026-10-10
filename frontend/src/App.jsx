@@ -313,7 +313,8 @@ export default function App() {
         </div>
         <div className="header-meta">
           <span className="system-status">
-            <span className="status-dot">●</span> LOCAL CORP V2.0
+            <span className={`status-dot${isWakingUp ? ' waking' : ''}`}>●</span>
+            {isWakingUp ? 'CONNECTING TO BACKEND' : 'BACKEND ONLINE'}
           </span>
           <button 
             className="theme-toggle-btn" 
