@@ -24,6 +24,7 @@ client = TestClient(main.app)
 
 REEL_URL = "https://www.instagram.com/reel/Z/"
 LONG_TRANSCRIPT = " ".join(["word"] * 30)  # clears the 15-word silent-hook guard
+FAKE_VECTOR = [0.25] * 384  # same size as the saved_reels.embedding vector(384) column
 EXTRACTION = ReelExtraction(
     core_topic="Topic", key_takeaway="Takeaway", action_items=["a"], tools_or_resources=["b"])
 
@@ -111,7 +112,7 @@ class FakeEmbeddingModel:
 
     def embed(self, texts):
         self.texts.extend(texts)
-        return ([0.25, 0.5] for _ in texts)
+        return (FAKE_VECTOR for _ in texts)
 
 
 @pytest.fixture(autouse=True)
@@ -309,7 +310,7 @@ def test_embed_reel_uses_topic_takeaway_and_tools(embedding_model):
     vector = main.embed_reel({
         "core_topic": "AI email tools", "key_takeaway": "Automate replies",
         "tools_or_resources": ["Zapier", "ChatGPT"], "action_items": ["not embedded"]})
-    assert vector == [0.25, 0.5]
+    assert vector == FAKE_VECTOR
     assert embedding_model.texts == ["AI email tools Automate replies Zapier, ChatGPT"]
 
 
@@ -320,6 +321,21 @@ def test_embed_reel_skips_reels_with_nothing_extracted(embedding_model):
 
 
 def test_embed_reel_returns_none_when_model_unavailable():
+    assert main.embed_reel({"core_topic": "AI"}) is None
+
+
+def test_embed_reel_never_raises_on_malformed_extraction(embedding_model):
+    assert main.embed_reel("a double-encoded string") is None
+    assert main.embed_reel(["a", "list"]) is None
+    assert main.embed_reel({"core_topic": "AI", "tools_or_resources": 5}) is None
+
+
+def test_embed_reel_drops_a_vector_the_database_cannot_store(monkeypatch):
+    class WrongSizeModel:
+        def embed(self, texts):
+            return ([0.1, 0.2, 0.3] for _ in texts)
+
+    monkeypatch.setattr(main, "_get_embedding_model", lambda: WrongSizeModel())
     assert main.embed_reel({"core_topic": "AI"}) is None
 
 
@@ -341,7 +357,7 @@ def test_every_save_path_stores_an_embedding(monkeypatch, pipeline, embedding_mo
     files = {"file": ("clip.mp3", io.BytesIO(b"audio"), "audio/mpeg")}
     assert client.post("/extract/file", files=files).status_code == 200
     assert main.worker_tick() is True
-    assert saved == [[0.25, 0.5]] * 4
+    assert saved == [FAKE_VECTOR] * 4
 
 
 def test_reel_still_saves_when_embedding_fails(monkeypatch):
@@ -368,7 +384,7 @@ def test_backfill_embeds_only_rows_with_content(monkeypatch, embedding_model):
     saved = {}
     monkeypatch.setattr(db, "set_embedding", lambda reel_id, embedding: saved.update({reel_id: embedding}))
     assert backfill_embeddings.backfill() == (2, 1)
-    assert saved == {"a": [0.25, 0.5], "c": [0.25, 0.5]}
+    assert saved == {"a": FAKE_VECTOR, "c": FAKE_VECTOR}
 
 
 def test_backfill_fails_loudly_without_a_model(monkeypatch):

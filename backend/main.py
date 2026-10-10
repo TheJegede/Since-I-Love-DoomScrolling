@@ -210,6 +210,7 @@ EMBEDDING_MODEL_NAME = os.getenv(
     "EMBEDDING_MODEL_NAME",
     "sentence-transformers/all-MiniLM-L6-v2",
 )
+EMBEDDING_DIMENSIONS = 384  # size of the saved_reels.embedding vector(384) column
 CLUSTER_SAMPLE_SIZE = 4
 MIN_SEMANTIC_CLUSTERS = 8
 MAX_SEMANTIC_CLUSTERS = 12
@@ -261,15 +262,20 @@ def embed_reel(extracted_json: Optional[dict]) -> Optional[List[float]]:
     Never raises: a reel must still save when embedding is unavailable
     (backfill_embeddings.py repairs it later). Returns None when there is
     nothing to embed."""
-    text = _reel_embedding_text(extracted_json)
-    if not text:
-        return None
     try:
-        vector = next(iter(_get_embedding_model().embed([text])))
-        return [float(x) for x in vector]
+        text = _reel_embedding_text(extracted_json)
+        if not text:
+            return None
+        vector = [float(x) for x in next(iter(_get_embedding_model().embed([text])))]
     except Exception as e:
         logger.warning(f"Could not embed reel for search: {getattr(e, 'detail', e)}")
         return None
+    if len(vector) != EMBEDDING_DIMENSIONS:
+        # pgvector would reject the whole row, losing the reel along with the vector.
+        logger.warning("Embedding has %s dimensions, expected %s; not storing it. Check EMBEDDING_MODEL_NAME.",
+                       len(vector), EMBEDDING_DIMENSIONS)
+        return None
+    return vector
 
 
 def _target_cluster_count(item_count: int) -> int:
