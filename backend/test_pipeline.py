@@ -358,6 +358,26 @@ def test_reel_still_saves_when_embedding_fails(monkeypatch):
     assert saved == {"embedding": None}
 
 
+def test_backfill_embeds_only_rows_with_content(monkeypatch, embedding_model):
+    import backfill_embeddings
+    monkeypatch.setattr(db, "reels_missing_embedding", lambda: [
+        {"id": "a", "extracted_json": {"core_topic": "AI tools"}},
+        {"id": "b", "extracted_json": {}},  # queued/failed reel: nothing to embed
+        {"id": "c", "extracted_json": '{"key_takeaway": "stored as a JSON string"}'},
+    ])
+    saved = {}
+    monkeypatch.setattr(db, "set_embedding", lambda reel_id, embedding: saved.update({reel_id: embedding}))
+    assert backfill_embeddings.backfill() == (2, 1)
+    assert saved == {"a": [0.25, 0.5], "c": [0.25, 0.5]}
+
+
+def test_backfill_fails_loudly_without_a_model(monkeypatch):
+    import backfill_embeddings
+    monkeypatch.setattr(db, "reels_missing_embedding", raiser(AssertionError("must not read rows without a model")))
+    with pytest.raises(RuntimeError, match="no embedding model"):
+        backfill_embeddings.backfill()
+
+
 # ---------------------------------------------------------------- worker
 
 def test_worker_tick_success(monkeypatch, pipeline):
