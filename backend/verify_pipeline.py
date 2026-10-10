@@ -46,14 +46,14 @@ def test_extract_text_mock():
     main.extract_structured_json = lambda t, c: mock_extracted
     
     # Mock saving to database to prevent real database call
-    original_save = main.save_to_database
-    main.save_to_database = lambda url, title, raw_transcript, post_caption, extracted: {
+    original_save = main.db.insert_reel
+    main.db.insert_reel = lambda url, title, raw_transcript, post_caption, extracted_json: {
         "id": "123e4567-e89b-12d3-a456-426614174000",
         "url": url,
         "title": title,
         "raw_transcript": raw_transcript,
         "post_caption": post_caption,
-        "extracted_json": extracted.model_dump(),
+        "extracted_json": extracted_json,
         "created_at": "2026-06-05T00:00:00Z"
     }
     
@@ -72,7 +72,7 @@ def test_extract_text_mock():
     finally:
         # Restore functions
         main.extract_structured_json = original_extract
-        main.save_to_database = original_save
+        main.db.insert_reel = original_save
 
 def test_recompute_clusters_mock():
     print("Testing POST /clusters/recompute (db + llm mocked)...")
@@ -144,16 +144,16 @@ def test_extract_url_regression():
     orig_dl = main.download_and_extract_audio
     orig_tr = main.transcribe_audio
     orig_ex = main.extract_structured_json
-    orig_save = main.save_to_database
+    orig_save = main.db.insert_reel
     orig_cache = main.db.get_reel_by_url
     main.db.get_reel_by_url = lambda url: None
     main.download_and_extract_audio = lambda url: ("/tmp/does_not_exist.mp3", "cap", "Title")
     main.transcribe_audio = lambda p: long_transcript
     main.extract_structured_json = lambda t, c: mocked
-    main.save_to_database = lambda url, title, raw_transcript, post_caption, extracted: {
+    main.db.insert_reel = lambda url, title, raw_transcript, post_caption, extracted_json: {
         "id": "id-1", "url": url, "title": title,
         "raw_transcript": raw_transcript, "post_caption": post_caption,
-        "extracted_json": extracted.model_dump(), "created_at": "2026-06-06T00:00:00Z"}
+        "extracted_json": extracted_json, "created_at": "2026-06-06T00:00:00Z"}
     try:
         r = client.post("/extract/url", json={"url": "https://www.instagram.com/reel/REGRESSION1/"})
         assert r.status_code == 200, r.text
@@ -163,7 +163,7 @@ def test_extract_url_regression():
         main.download_and_extract_audio = orig_dl
         main.transcribe_audio = orig_tr
         main.extract_structured_json = orig_ex
-        main.save_to_database = orig_save
+        main.db.insert_reel = orig_save
         main.db.get_reel_by_url = orig_cache
 
 
@@ -229,6 +229,23 @@ def test_worker_tick_empty():
         print("[OK] worker_tick empty passed!")
     finally:
         main.db.claim_next_pending = orig
+
+
+def test_run_worker_drain():
+    print("Testing run_worker drains the queue and survives a failed recovery...")
+    import main
+    ticks = iter([True, True, False])
+    orig = (main.db.recover_stale_processing, main.worker_tick)
+    def _boom(stale_before):
+        raise RuntimeError("db offline")
+    main.db.recover_stale_processing = _boom
+    main.worker_tick = lambda: next(ticks)
+    try:
+        main.run_worker(drain=True)
+        assert next(ticks, None) is None, "drain should stop at the first empty tick"
+        print("[OK] run_worker drain passed!")
+    finally:
+        main.db.recover_stale_processing, main.worker_tick = orig
 
 
 def test_delete_reel():
@@ -557,9 +574,9 @@ def test_api_auth_token_check():
         )
         orig_extract = main.extract_structured_json
         main.extract_structured_json = lambda t, c: mock_extracted
-        orig_save = main.save_to_database
-        main.save_to_database = lambda url, title, raw_transcript, post_caption, extracted: {
-            "id": "1", "title": title, "extracted_json": extracted.model_dump(), "created_at": "2026-06-06T00:00:00Z"
+        orig_save = main.db.insert_reel
+        main.db.insert_reel = lambda url, title, raw_transcript, post_caption, extracted_json: {
+            "id": "1", "title": title, "extracted_json": extracted_json, "created_at": "2026-06-06T00:00:00Z"
         }
         try:
             res = client.post("/extract/text", json={"title": "Test", "transcript": "a", "caption": "b"}, headers={"X-API-Key": "super_secret_test_key"})
@@ -567,7 +584,7 @@ def test_api_auth_token_check():
             assert res.json()["title"] == "Test"
         finally:
             main.extract_structured_json = orig_extract
-            main.save_to_database = orig_save
+            main.db.insert_reel = orig_save
 
         print("[OK] API Access Gate authentication check passed!")
     finally:
@@ -682,6 +699,7 @@ if __name__ == "__main__":
     test_worker_tick_success()
     test_worker_tick_failure()
     test_worker_tick_empty()
+    test_run_worker_drain()
     test_extract_url_regression()
     test_delete_reel()
     test_get_reel_details()

@@ -18,6 +18,10 @@ import httpx
 from dotenv import load_dotenv
 import re
 import glob
+import shutil
+
+import db
+from saved_parser import parse_saved_posts, normalize_instagram_url
 
 # Load local environment variables if present (for local dev)
 load_dotenv()
@@ -31,13 +35,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Auto-inject ffmpeg from WinGet packages if not found in PATH (Windows local dev helper)
-import shutil
 if not shutil.which("ffmpeg") or not shutil.which("ffprobe"):
     localappdata = os.environ.get("LOCALAPPDATA")
     if localappdata:
         winget_packages_dir = os.path.join(localappdata, "Microsoft", "WinGet", "Packages")
         if os.path.exists(winget_packages_dir):
-            import glob
             ffmpeg_paths = glob.glob(os.path.join(winget_packages_dir, "**", "ffmpeg.exe"), recursive=True)
             if ffmpeg_paths:
                 ffmpeg_bin_dir = os.path.dirname(ffmpeg_paths[0])
@@ -78,10 +80,6 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
         if not x_api_key or x_api_key.strip() != API_AUTH_TOKEN.strip():
             raise HTTPException(status_code=401, detail="Unauthorized API access. Valid X-API-Key header required.")
 
-# Initialize data layer
-import db
-from saved_parser import parse_saved_posts, normalize_instagram_url
-
 
 def init_local_db():
     """Schema is managed in Supabase (see docs). This only verifies config presence."""
@@ -103,11 +101,7 @@ async def lifespan(app: FastAPI):
         else:
             logger.info("ENABLE_WORKER=0 — queue worker disabled.")
     else:
-        recovered = db.recover_stale_processing(
-            datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
-        )
-        logger.info("Recovered %s stale queue item(s).", recovered)
-        threading.Thread(target=_worker_loop, daemon=True).start()
+        threading.Thread(target=run_worker, daemon=True).start()
     yield
 
 
@@ -173,6 +167,36 @@ class ExtractionResponse(BaseModel):
     post_caption: Optional[str] = None
     extracted_json: ReelExtraction
     created_at: Optional[str] = None
+
+
+def _chat_json(task: str, system_prompt: str, user_prompt: str, parse):
+    """Ask each configured model in turn for a JSON reply and return
+    parse(reply) from the first that succeeds. Raises HTTPException(500)
+    once every model has failed."""
+    if not groq_client:
+        raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
+
+    last_error = None
+    for model_name in dict.fromkeys([GROQ_LLM_MODEL, *GROQ_LLM_FALLBACK_MODELS]):
+        logger.info(f"Sending prompt to LLM ({model_name})")
+        try:
+            response = groq_client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                response_format={"type": "json_object"},
+            )
+            content = response.choices[0].message.content
+            logger.info(f"LLM response from {model_name}: {content}")
+            return parse(json.loads(content))
+        except Exception as e:
+            logger.warning(f"{task} attempt on {model_name} failed: {e}")
+            last_error = e
+
+    logger.error(f"{task} failed on every model. Last error: {last_error}")
+    raise HTTPException(status_code=500, detail=f"{task} failed: {last_error}")
 
 
 # Semantic clustering uses local embeddings for assignment and one small LLM call only for names.
@@ -241,28 +265,16 @@ def _semantic_cluster_labels(embeddings: List) -> List[int]:
                    "Install backend/requirements.txt.",
         ) from e
 
-    cluster_count = _target_cluster_count(len(embeddings))
-    try:
-        clusterer = AgglomerativeClustering(
-            n_clusters=cluster_count,
-            metric="cosine",
-            linkage="average",
-        )
-    except TypeError:
-        # Compatibility with older scikit-learn releases.
-        clusterer = AgglomerativeClustering(
-            n_clusters=cluster_count,
-            affinity="cosine",
-            linkage="average",
-        )
+    clusterer = AgglomerativeClustering(
+        n_clusters=_target_cluster_count(len(embeddings)),
+        metric="cosine",
+        linkage="average",
+    )
     return [int(label) for label in clusterer.fit_predict(embeddings)]
 
 
 def _name_semantic_clusters(items: List[dict], labels: List[int]) -> dict:
     """Name mathematical clusters with one compact, schema-constrained LLM call."""
-    if not groq_client:
-        raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
-
     examples_by_cluster = {}
     for item, label in zip(items, labels):
         topic = str(item.get("topic") or "").strip()
@@ -291,32 +303,7 @@ def _name_semantic_clusters(items: List[dict], labels: List[int]) -> dict:
         ensure_ascii=False,
     )
 
-    models_to_try = [GROQ_LLM_MODEL] + [m for m in GROQ_LLM_FALLBACK_MODELS if m != GROQ_LLM_MODEL]
-    validated = None
-    last_error = None
-
-    for model_name in models_to_try:
-        try:
-            response = groq_client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                response_format={"type": "json_object"},
-            )
-            data = json.loads(response.choices[0].message.content)
-            validated = ClusterNames(**data)
-            break
-        except json.JSONDecodeError as e:
-            logger.warning(f"Cluster naming model {model_name} returned invalid JSON: {e}")
-            last_error = e
-        except Exception as e:
-            logger.warning(f"Cluster naming model {model_name} failed: {e}")
-            last_error = e
-
-    if not validated:
-        raise HTTPException(status_code=500, detail=f"Cluster naming failed: {last_error}")
+    validated = _chat_json("Cluster naming", system_prompt, user_prompt, lambda data: ClusterNames(**data))
 
     names = {}
     used_names = set()
@@ -499,11 +486,18 @@ def guard_silent_hook(raw_transcript: str, caption: Optional[str]) -> None:
                 detail="No spoken audio or caption text was detected. Clip could not be summarized."
             )
 
-def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
-    """Analyze text metadata with Llama 3.1 8B on Groq to output schema-validated insights."""
-    if not groq_client:
-        raise HTTPException(status_code=500, detail="Groq client is not configured on the backend server.")
+def _parse_extraction(data) -> ReelExtraction:
+    if isinstance(data, list):
+        if not data:
+            raise ValueError("LLM returned an empty JSON array.")
+        data = data[0]
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected JSON object, got {type(data).__name__}")
+    return ReelExtraction(**data)
 
+
+def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
+    """Analyze the transcript and caption with the configured Groq LLM to output schema-validated insights."""
     system_prompt = (
         "You are an expert educational and content summarization assistant.\n"
         "Your task is to analyze the audio transcription and post caption of an Instagram Reel "
@@ -527,67 +521,7 @@ def extract_structured_json(transcript: str, caption: str) -> ReelExtraction:
     if caption:
         user_prompt += f"Post Caption/Description:\n{caption}\n"
 
-    models_to_try = [GROQ_LLM_MODEL] + [m for m in GROQ_LLM_FALLBACK_MODELS if m != GROQ_LLM_MODEL]
-    last_error = None
-
-    for model_name in models_to_try:
-        logger.info(f"Sending prompt to LLM ({model_name})")
-        try:
-            response = groq_client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={"type": "json_object"}
-            )
-            
-            content = response.choices[0].message.content
-            logger.info(f"LLM response from {model_name}: {content}")
-            
-            # Parse and validate structure
-            data = json.loads(content)
-            if isinstance(data, list):
-                if len(data) > 0:
-                    data = data[0]
-                else:
-                    raise ValueError("LLM returned an empty JSON array.")
-            if not isinstance(data, dict):
-                raise ValueError(f"Expected JSON object, got {type(data).__name__}")
-            validated_data = ReelExtraction(**data)
-            return validated_data
-        except json.JSONDecodeError as je:
-            logger.warning(f"JSON parsing error from {model_name}: {str(je)}")
-            last_error = je
-        except Exception as e:
-            logger.warning(f"Structured extraction attempt on {model_name} failed: {str(e)}")
-            last_error = e
-
-    logger.error(f"All LLM extraction attempts failed. Last error: {str(last_error)}")
-    raise HTTPException(status_code=500, detail=f"Structured extraction failed: {str(last_error)}")
-
-def save_to_database(
-    url: Optional[str],
-    title: str,
-    raw_transcript: Optional[str],
-    post_caption: Optional[str],
-    extracted: ReelExtraction,
-) -> dict:
-    """Persist a record via the Supabase data layer, returning the saved record.
-    If the URL already exists, returns the existing row (cache/idempotency)."""
-    if url:
-        existing = db.get_reel_by_url(url)
-        if existing:
-            logger.info(f"Reel already exists. ID: {existing['id']}")
-            return existing
-    return db.insert_reel(
-        url=url,
-        title=title,
-        raw_transcript=raw_transcript,
-        post_caption=post_caption,
-        extracted_json=extracted.model_dump(),
-        source=None,
-    )
+    return _chat_json("Structured extraction", system_prompt, user_prompt, _parse_extraction)
 
 # API Endpoints
 @app.get("/health")
@@ -750,7 +684,7 @@ def process_reel_url(url: str) -> dict:
 
     Returns the cached row if this URL was already processed. Raises
     HTTPException(400) on silent-hook reels (no spoken content). Used by
-    /extract/url and (indirectly) the queue worker."""
+    /extract/url."""
     clean_url = normalize_instagram_url(url)
     cached = db.get_reel_by_url(clean_url)
     if cached:
@@ -758,12 +692,17 @@ def process_reel_url(url: str) -> dict:
         return cached
 
     title, raw_transcript, post_caption, extracted = _run_pipeline(clean_url)
-    return save_to_database(
+    # The Shortcut or worker may have saved this URL while the pipeline ran.
+    existing = db.get_reel_by_url(clean_url)
+    if existing:
+        logger.info(f"Reel already exists. ID: {existing['id']}")
+        return existing
+    return db.insert_reel(
         url=clean_url,
         title=title,
         raw_transcript=raw_transcript,
         post_caption=post_caption,
-        extracted=extracted,
+        extracted_json=extracted.model_dump(),
     )
 
 
@@ -855,18 +794,33 @@ def worker_tick() -> bool:
     return True
 
 
-def _worker_loop(idle_interval: float = 20.0) -> None:
-    """Background loop: drain the queue, backing off when it's empty."""
+def run_worker(drain: bool = False, idle_interval: float = 20.0) -> None:
+    """Recover abandoned claims, then process the queue.
+
+    Idles between polls when the queue is empty; with drain=True it exits
+    instead (also after a crashed tick). Shared by the in-process thread and
+    run_worker.py."""
+    try:
+        recovered = db.recover_stale_processing(
+            datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
+        )
+        logger.info("Recovered %s stale queue item(s).", recovered)
+    except Exception as e:
+        logger.error(f"Stale-claim recovery failed: {e}")
+
     logger.info("Queue worker started.")
     while True:
         try:
             did_work = worker_tick()
         except Exception as e:
             logger.error(f"Worker tick crashed: {str(e)}")
-            time.sleep(idle_interval)
+            did_work = False
+        if did_work:
             continue
-        if not did_work:
-            time.sleep(idle_interval)
+        if drain:
+            logger.info("No more pending reels to process. Exiting drain worker.")
+            return
+        time.sleep(idle_interval)
 
 
 @app.post("/extract/file", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
@@ -902,15 +856,13 @@ def extract_file(
         extracted_data = extract_structured_json(raw_transcript, caption or "")
 
         # 4. Commit to Database
-        db_record = save_to_database(
-            url=None, # No URL for manual upload
+        return db.insert_reel(
+            url=None,  # No URL for manual upload
             title=title,
             raw_transcript=raw_transcript,
             post_caption=caption,
-            extracted=extracted_data
+            extracted_json=extracted_data.model_dump(),
         )
-
-        return db_record
     finally:
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
@@ -932,15 +884,13 @@ def extract_text(payload: dict):
     extracted_data = extract_structured_json(transcript, caption)
 
     # Save to database
-    db_record = save_to_database(
+    return db.insert_reel(
         url=None,
         title=title,
         raw_transcript=transcript,
         post_caption=caption,
-        extracted=extracted_data
+        extracted_json=extracted_data.model_dump(),
     )
-
-    return db_record
 
 
 ACTIVE_REEL_STATUSES = frozenset({"pending", "processing"})
