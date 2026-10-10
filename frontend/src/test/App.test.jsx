@@ -88,6 +88,37 @@ describe('App baseline', () => {
     });
   });
 
+  it('shows the queue banner when the submitted URL is already queued', async () => {
+    globalThis.fetch = vi.fn((input) => {
+      const u = String(input);
+      if (u.endsWith('/health')) return Promise.resolve({ ok: true });
+      if (u.includes('/extract/url')) {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            id: 'reel_queued',
+            title: null,
+            url: 'https://www.instagram.com/reel/QUEUED1/',
+            extracted_json: {},
+            status: 'pending',
+            error: null
+          })
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
+    });
+
+    render(<App />);
+    await screen.findByText(/No extractions found/i);
+
+    const input = screen.getByPlaceholderText(/instagram\.com\/reel/i);
+    fireEvent.change(input, { target: { value: 'https://www.instagram.com/reel/QUEUED1/' } });
+    fireEvent.submit(input.closest('form'));
+
+    expect(await screen.findByText('In Ingestion Queue')).toBeInTheDocument();
+    expect(screen.getByText('QUEUED →')).toBeInTheDocument();
+  });
+
   it('paginates reels list to 25 items and updates page on clicking Next/Prev', async () => {
     // Generate 30 mock reels
     const mockReels = Array.from({ length: 30 }, (_, i) => ({

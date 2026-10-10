@@ -160,13 +160,18 @@ class ReelExtraction(BaseModel):
         return str(item).strip()
 
 class ExtractionResponse(BaseModel):
+    """A saved reel row. /extract/url can return one that is still queued or
+    failed (the URL was already submitted), so only finished rows carry a
+    title and a full ReelExtraction in extracted_json."""
     id: Optional[str] = None
     url: Optional[str] = None
-    title: str
+    title: Optional[str] = None
     raw_transcript: Optional[str] = None
     post_caption: Optional[str] = None
-    extracted_json: ReelExtraction
+    extracted_json: dict
     created_at: Optional[str] = None
+    status: str = "done"
+    error: Optional[str] = None
 
 
 def _chat_json(task: str, system_prompt: str, user_prompt: str, parse):

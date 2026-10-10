@@ -167,6 +167,26 @@ def test_extract_url_regression():
         main.db.get_reel_by_url = orig_cache
 
 
+def test_extract_url_returns_unfinished_row():
+    print("Testing POST /extract/url returns an already-queued or failed row instead of 500...")
+    import main
+    orig = main.db.get_reel_by_url
+    try:
+        # title is None for rows the iPhone Shortcut inserts over REST
+        for status, title, error in (("pending", None, None), ("failed", "Reel (Q)", "Meta blocking request")):
+            main.db.get_reel_by_url = lambda url: {
+                "id": "row-q", "url": url, "title": title, "raw_transcript": "", "post_caption": None,
+                "extracted_json": {}, "created_at": "2026-10-10T00:00:00Z", "cluster": "Unclustered",
+                "status": status, "error": error}
+            r = client.post("/extract/url", json={"url": "https://www.instagram.com/reel/QUEUED1/"})
+            assert r.status_code == 200, r.text
+            assert r.json()["status"] == status, r.json()
+            assert r.json()["error"] == error, r.json()
+        print("[OK] extract_url unfinished-row passthrough passed!")
+    finally:
+        main.db.get_reel_by_url = orig
+
+
 def test_worker_tick_success():
     print("Testing worker_tick processes a pending reel (mocked)...")
     import main
@@ -701,6 +721,7 @@ if __name__ == "__main__":
     test_worker_tick_empty()
     test_run_worker_drain()
     test_extract_url_regression()
+    test_extract_url_returns_unfinished_row()
     test_delete_reel()
     test_get_reel_details()
     test_reels_include_cluster()
