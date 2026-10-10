@@ -257,12 +257,16 @@ def _target_cluster_count(item_count: int) -> int:
 
 
 def _semantic_cluster_labels(embeddings: List) -> List[int]:
-    """Group embeddings with cosine-distance agglomerative clustering."""
+    """Group embeddings with k-means on unit-length vectors (i.e. by cosine similarity).
+
+    Average-linkage agglomerative clustering was used before; on a 740-reel
+    library it put 96% of the reels into two clusters and left singletons."""
     if len(embeddings) <= 1:
         return [0] * len(embeddings)
 
     try:
-        from sklearn.cluster import AgglomerativeClustering
+        from sklearn.cluster import KMeans
+        from sklearn.preprocessing import normalize
     except ImportError as e:
         raise HTTPException(
             status_code=500,
@@ -270,12 +274,9 @@ def _semantic_cluster_labels(embeddings: List) -> List[int]:
                    "Install backend/requirements.txt.",
         ) from e
 
-    clusterer = AgglomerativeClustering(
-        n_clusters=_target_cluster_count(len(embeddings)),
-        metric="cosine",
-        linkage="average",
-    )
-    return [int(label) for label in clusterer.fit_predict(embeddings)]
+    # Fixed seed: recomputing an unchanged library yields the same grouping.
+    clusterer = KMeans(n_clusters=_target_cluster_count(len(embeddings)), n_init=10, random_state=0)
+    return [int(label) for label in clusterer.fit_predict(normalize(embeddings))]
 
 
 def _name_semantic_clusters(items: List[dict], labels: List[int]) -> dict:
@@ -664,13 +665,15 @@ def get_recompute_status():
     """Poll endpoint to check recomputation status."""
     return CLUSTER_JOB
 
-def _run_pipeline(url: str) -> tuple[str, str, str, ReelExtraction]:
+def _run_pipeline(url: str, allow_caption_fallback: bool = True) -> tuple[str, str, str, ReelExtraction]:
     """Download → transcribe → silent-hook guard → LLM extract for one reel.
 
     Owns the temp audio file (always cleaned up). Returns
     (title, raw_transcript, post_caption, extracted). Raises HTTPException(400)
-    on silent-hook reels and HTTPException(500) on download/transcription/LLM
-    failures. Callers handle persistence."""
+    on silent-hook reels and HTTPException(500) on download/LLM failures. A
+    failed transcription falls back to the caption alone unless
+    allow_caption_fallback is False, in which case it raises too. Callers
+    handle persistence."""
     mp3_path = None
     try:
         mp3_path, post_caption, title = download_and_extract_audio(url)
@@ -678,6 +681,8 @@ def _run_pipeline(url: str) -> tuple[str, str, str, ReelExtraction]:
         try:
             raw_transcript = transcribe_audio(mp3_path)
         except Exception as e:
+            if not allow_caption_fallback:
+                raise
             logger.warning(f"Transcription failed: {str(e)}. Proceeding using metadata/caption only.")
         guard_silent_hook(raw_transcript, post_caption)
         extracted = extract_structured_json(raw_transcript, post_caption)
@@ -744,7 +749,11 @@ def process_pending_reel(row: dict) -> None:
         db.mark_failed(reel_id, f"Invalid Instagram Reel URL format: {url}")
         return
     try:
-        title, raw_transcript, post_caption, extracted = _run_pipeline(clean_url)
+        # A failed transcription is retried like any transient error; only the
+        # last attempt settles for a caption-only extraction.
+        is_final_attempt = int(row.get("attempt_count") or 0) >= MAX_WORKER_ATTEMPTS
+        title, raw_transcript, post_caption, extracted = _run_pipeline(
+            clean_url, allow_caption_fallback=is_final_attempt)
         db.update_reel_result(
             reel_id=reel_id,
             title=title,
