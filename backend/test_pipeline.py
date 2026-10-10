@@ -28,7 +28,7 @@ EXTRACTION = ReelExtraction(
     core_topic="Topic", key_takeaway="Takeaway", action_items=["a"], tools_or_resources=["b"])
 
 
-def fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json):
+def fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json, embedding=None):
     return {"id": "id-1", "url": url, "title": title, "raw_transcript": raw_transcript,
             "post_caption": post_caption, "extracted_json": extracted_json,
             "created_at": "2026-06-06T00:00:00Z"}
@@ -102,6 +102,29 @@ class RecordingTable:
     def execute(self):
         start, end = self.window
         return type("Result", (), {"data": self.rows[start:end + 1]})()
+
+
+class FakeEmbeddingModel:
+    """Stand-in for fastembed's TextEmbedding: records texts, returns fixed vectors."""
+    def __init__(self):
+        self.texts = []
+
+    def embed(self, texts):
+        self.texts.extend(texts)
+        return ([0.25, 0.5] for _ in texts)
+
+
+@pytest.fixture(autouse=True)
+def no_embedding_model(monkeypatch):
+    """Never load the real embedding model in tests; embed_reel then returns None."""
+    monkeypatch.setattr(main, "_get_embedding_model", raiser(RuntimeError("no embedding model in tests")))
+
+
+@pytest.fixture
+def embedding_model(monkeypatch, no_embedding_model):
+    model = FakeEmbeddingModel()
+    monkeypatch.setattr(main, "_get_embedding_model", lambda: model)
+    return model
 
 
 @pytest.fixture
@@ -280,13 +303,68 @@ def test_cluster_labels_are_balanced():
     assert sizes == [8] * 8, sizes
 
 
+# ---------------------------------------------------------------- search embeddings
+
+def test_embed_reel_uses_topic_takeaway_and_tools(embedding_model):
+    vector = main.embed_reel({
+        "core_topic": "AI email tools", "key_takeaway": "Automate replies",
+        "tools_or_resources": ["Zapier", "ChatGPT"], "action_items": ["not embedded"]})
+    assert vector == [0.25, 0.5]
+    assert embedding_model.texts == ["AI email tools Automate replies Zapier, ChatGPT"]
+
+
+def test_embed_reel_skips_reels_with_nothing_extracted(embedding_model):
+    assert main.embed_reel({}) is None  # queued/failed reel
+    assert main.embed_reel(None) is None
+    assert embedding_model.texts == []
+
+
+def test_embed_reel_returns_none_when_model_unavailable():
+    assert main.embed_reel({"core_topic": "AI"}) is None
+
+
+def test_every_save_path_stores_an_embedding(monkeypatch, pipeline, embedding_model):
+    saved = []
+
+    def record_insert(url, title, raw_transcript, post_caption, extracted_json, embedding=None):
+        saved.append(embedding)
+        return fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json)
+
+    monkeypatch.setattr(main.db, "get_reel_by_url", lambda url: None)
+    monkeypatch.setattr(main.db, "insert_reel", record_insert)
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
+    monkeypatch.setattr(main.db, "update_reel_result", lambda **kwargs: saved.append(kwargs["embedding"]))
+    monkeypatch.setattr(main.db, "mark_failed", raiser(AssertionError("should not be marked failed")))
+
+    assert client.post("/extract/url", json={"url": REEL_URL}).status_code == 200
+    assert client.post("/extract/text", json={"transcript": "hello there"}).status_code == 200
+    files = {"file": ("clip.mp3", io.BytesIO(b"audio"), "audio/mpeg")}
+    assert client.post("/extract/file", files=files).status_code == 200
+    assert main.worker_tick() is True
+    assert saved == [[0.25, 0.5]] * 4
+
+
+def test_reel_still_saves_when_embedding_fails(monkeypatch):
+    saved = {}
+
+    def record_insert(url, title, raw_transcript, post_caption, extracted_json, embedding=None):
+        saved["embedding"] = embedding
+        return fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json)
+
+    monkeypatch.setattr(main, "extract_structured_json", lambda transcript, caption: EXTRACTION)
+    monkeypatch.setattr(main.db, "insert_reel", record_insert)
+    r = client.post("/extract/text", json={"transcript": "hello there"})
+    assert r.status_code == 200, r.text
+    assert saved == {"embedding": None}
+
+
 # ---------------------------------------------------------------- worker
 
 def test_worker_tick_success(monkeypatch, pipeline):
     saved = {}
     monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
     monkeypatch.setattr(main.db, "update_reel_result",
-                        lambda reel_id, title, raw_transcript, post_caption, extracted_json:
+                        lambda reel_id, title, raw_transcript, post_caption, extracted_json, embedding=None:
                         saved.update(id=reel_id, title=title))
     monkeypatch.setattr(main.db, "mark_failed", raiser(AssertionError("should not be marked failed")))
     assert main.worker_tick() is True

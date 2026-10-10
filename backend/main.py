@@ -247,6 +247,31 @@ def _get_embedding_model():
     return _embedding_model
 
 
+def _reel_embedding_text(extracted_json: Optional[dict]) -> str:
+    """The text a reel is fingerprinted from for semantic search."""
+    ej = extracted_json or {}
+    tools = ", ".join(str(tool) for tool in ej.get("tools_or_resources") or [])
+    parts = (ej.get("core_topic"), ej.get("key_takeaway"), tools)
+    return " ".join(str(part).strip() for part in parts if part and str(part).strip())
+
+
+def embed_reel(extracted_json: Optional[dict]) -> Optional[List[float]]:
+    """Fingerprint a reel for semantic search.
+
+    Never raises: a reel must still save when embedding is unavailable
+    (backfill_embeddings.py repairs it later). Returns None when there is
+    nothing to embed."""
+    text = _reel_embedding_text(extracted_json)
+    if not text:
+        return None
+    try:
+        vector = next(iter(_get_embedding_model().embed([text])))
+        return [float(x) for x in vector]
+    except Exception as e:
+        logger.warning(f"Could not embed reel for search: {getattr(e, 'detail', e)}")
+        return None
+
+
 def _target_cluster_count(item_count: int) -> int:
     """Choose a small, stable number of broad clusters for the library size."""
     if item_count <= 0:
@@ -714,12 +739,14 @@ def process_reel_url(url: str) -> dict:
     if existing:
         logger.info(f"Reel already exists. ID: {existing['id']}")
         return existing
+    extracted_json = extracted.model_dump()
     return db.insert_reel(
         url=clean_url,
         title=title,
         raw_transcript=raw_transcript,
         post_caption=post_caption,
-        extracted_json=extracted.model_dump(),
+        extracted_json=extracted_json,
+        embedding=embed_reel(extracted_json),
     )
 
 
@@ -754,12 +781,14 @@ def process_pending_reel(row: dict) -> None:
         is_final_attempt = int(row.get("attempt_count") or 0) >= MAX_WORKER_ATTEMPTS
         title, raw_transcript, post_caption, extracted = _run_pipeline(
             clean_url, allow_caption_fallback=is_final_attempt)
+        extracted_json = extracted.model_dump()
         db.update_reel_result(
             reel_id=reel_id,
             title=title,
             raw_transcript=raw_transcript,
             post_caption=post_caption,
-            extracted_json=extracted.model_dump(),
+            extracted_json=extracted_json,
+            embedding=embed_reel(extracted_json),
         )
         logger.info(f"Worker processed reel {reel_id} ({url})")
     except HTTPException as e:
@@ -877,12 +906,14 @@ def extract_file(
         extracted_data = extract_structured_json(raw_transcript, caption or "")
 
         # 4. Commit to Database
+        extracted_json = extracted_data.model_dump()
         return db.insert_reel(
             url=None,  # No URL for manual upload
             title=title,
             raw_transcript=raw_transcript,
             post_caption=caption,
-            extracted_json=extracted_data.model_dump(),
+            extracted_json=extracted_json,
+            embedding=embed_reel(extracted_json),
         )
     finally:
         if os.path.exists(temp_file_path):
@@ -905,12 +936,14 @@ def extract_text(payload: dict):
     extracted_data = extract_structured_json(transcript, caption)
 
     # Save to database
+    extracted_json = extracted_data.model_dump()
     return db.insert_reel(
         url=None,
         title=title,
         raw_transcript=transcript,
         post_caption=caption,
-        extracted_json=extracted_data.model_dump(),
+        extracted_json=extracted_json,
+        embedding=embed_reel(extracted_json),
     )
 
 
