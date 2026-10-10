@@ -6,10 +6,6 @@ import db
 
 c = db.get_client()
 
-# Delete test row
-c.table('saved_reels').delete().eq('url', 'https://www.instagram.com/reel/DIAGTEST1/').execute()
-print('Test row deleted.')
-
 # Show any non-done rows
 res = c.table('saved_reels').select('id,url,status,source,created_at,error,attempt_count,processing_started_at,next_attempt_at').in_('status', ['pending', 'processing', *db.FAILURE_STATUSES]).order('created_at', desc=True).limit(10).execute()
 rows = res.data or []

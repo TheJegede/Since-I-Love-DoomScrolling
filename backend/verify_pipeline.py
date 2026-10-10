@@ -80,6 +80,7 @@ def test_recompute_clusters_mock():
     fake_rows = [
         {"id": "a", "extracted_json": {"core_topic": "AI email tools"}},
         {"id": "b", "extracted_json": {"core_topic": "Marathon training"}},
+        {"id": "c", "extracted_json": {}},  # queued/failed reel: nothing to cluster
     ]
     applied = []
     orig_for = main.db.reels_for_clustering
@@ -100,6 +101,7 @@ def test_recompute_clusters_mock():
         assert job["status"] == "done", job
         assert job["assigned"] == 2, job
         assert ("a", "Productivity") in applied
+        assert ("c", None) in applied, "unextracted reel should be reset to Unclustered"
         print("[OK] recompute clusters passed!")
     finally:
         main.db.reels_for_clustering = orig_for

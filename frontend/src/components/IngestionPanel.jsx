@@ -133,7 +133,7 @@ export default function IngestionPanel(props) {
               onChange={(e) => setTextTranscript(e.target.value)}
             />
             <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isLoading}>
-              {isLoading ? "RUNNING GROQ LLAMA..." : "EXTRACT INSIGHTS"}
+              {isLoading ? "RUNNING LLM..." : "EXTRACT INSIGHTS"}
             </button>
           </div>
         </form>

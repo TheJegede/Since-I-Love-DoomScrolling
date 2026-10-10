@@ -140,7 +140,7 @@ export default function App() {
     { num: 2, label: "Fetch Video" },
     { num: 3, label: "Audio Extract" },
     { num: 4, label: "Transcribe" },
-    { num: 5, label: "Llama Extract" },
+    { num: 5, label: "LLM Extract" },
     { num: 6, label: "Save DB" }
   ];
 

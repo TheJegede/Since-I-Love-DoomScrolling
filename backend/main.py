@@ -131,7 +131,7 @@ class ReelExtraction(BaseModel):
     @field_validator("action_items", "tools_or_resources", mode="before")
     @classmethod
     def coerce_list_of_strings(cls, value):
-        """The 8B model often returns list items as dicts (e.g. {step, action, description})
+        """LLMs often return list items as dicts (e.g. {step, action, description})
         instead of plain strings. Flatten any such items into readable strings so validation
         does not 500 on otherwise-valid extractions."""
         if value is None:
@@ -194,7 +194,7 @@ def _chat_json(task: str, system_prompt: str, user_prompt: str, parse):
                 response_format={"type": "json_object"},
             )
             content = response.choices[0].message.content
-            logger.info(f"LLM response from {model_name}: {content}")
+            logger.debug(f"LLM response from {model_name}: {content}")
             return parse(json.loads(content))
         except Exception as e:
             logger.warning(f"{task} attempt on {model_name} failed: {e}")
@@ -611,6 +611,7 @@ def run_cluster_recompute_task():
             return
 
         items = []
+        unextracted_ids = []  # queued or failed reels: nothing to cluster on
         for r in rows:
             ej = r.get("extracted_json")
             if isinstance(ej, str):
@@ -618,8 +619,14 @@ def run_cluster_recompute_task():
                     ej = json.loads(ej)
                 except Exception:
                     ej = {}
-            items.append({"id": r["id"], "topic": (ej or {}).get("core_topic", ""), "takeaway": (ej or {}).get("key_takeaway", "")})
+            topic = (ej or {}).get("core_topic", "")
+            takeaway = (ej or {}).get("key_takeaway", "")
+            if topic or takeaway:
+                items.append({"id": r["id"], "topic": topic, "takeaway": takeaway})
+            else:
+                unextracted_ids.append(r["id"])
 
+        db.set_cluster(unextracted_ids, None)
         ids_by_cluster = {}
         for assignment in cluster_topics_semantically(items):
             ids_by_cluster.setdefault(assignment["cluster"], []).append(assignment["id"])

@@ -9,7 +9,6 @@ ENV PYTHONUNBUFFERED=1 \
 # Install system dependencies (ffmpeg is required for audio extraction)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up working directory

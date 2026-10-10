@@ -139,7 +139,7 @@ def reels_for_clustering() -> list:
     return _select_newest_first("id, extracted_json")
 
 
-def set_cluster(reel_ids: list, cluster: str) -> None:
+def set_cluster(reel_ids: list, cluster: Optional[str]) -> None:
     for chunk in _chunked(reel_ids, 100):
         get_client().table(TABLE).update({"cluster": cluster}).in_("id", chunk).execute()
 
