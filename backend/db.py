@@ -35,13 +35,17 @@ def _chunked(seq: list, size: int):
         yield seq[i:i + size]
 
 
-def _select_newest_first(columns: str, limit: Optional[int] = None) -> list:
-    """Select rows newest-first, paging past PostgREST's per-request row cap."""
+def _select_newest_first(columns: str, limit: Optional[int] = None, refine=None) -> list:
+    """Select rows newest-first, paging past PostgREST's per-request row cap.
+
+    refine, if given, adds filters to each page's query."""
     rows = []
     while limit is None or len(rows) < limit:
         last = len(rows) + 999 if limit is None else limit - 1
-        page = (get_client().table(TABLE).select(columns)
-                .order("created_at", desc=True).order("id")
+        query = get_client().table(TABLE).select(columns)
+        if refine:
+            query = refine(query)
+        page = (query.order("created_at", desc=True).order("id")
                 .range(len(rows), last).execute().data or [])
         if not page:
             break
@@ -78,7 +82,7 @@ def get_reel_by_url(url: str) -> Optional[dict]:
 
 
 def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
-                status="done", source=None) -> dict:
+                status="done", source=None, embedding=None) -> dict:
     row = {
         "id": str(uuid.uuid4()),
         "url": url,
@@ -90,6 +94,8 @@ def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
         "status": status,
         "source": source,
     }
+    if embedding is not None:
+        row["embedding"] = embedding  # list -> pgvector
     get_client().table(TABLE).insert(row).execute()
     return row_to_record(row)
 
@@ -139,6 +145,15 @@ def reels_for_clustering() -> list:
     return _select_newest_first("id, extracted_json")
 
 
+def reels_missing_embedding() -> list:
+    """Rows with no search embedding yet, as [{id, extracted_json}]."""
+    return _select_newest_first("id, extracted_json", refine=lambda q: q.is_("embedding", "null"))
+
+
+def set_embedding(reel_id: str, embedding: list) -> None:
+    get_client().table(TABLE).update({"embedding": embedding}).eq("id", reel_id).execute()
+
+
 def set_cluster(reel_ids: list, cluster: Optional[str]) -> None:
     for chunk in _chunked(reel_ids, 100):
         get_client().table(TABLE).update({"cluster": cluster}).in_("id", chunk).execute()
@@ -179,9 +194,9 @@ def claim_next_pending() -> Optional[dict]:
 
 
 def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
-                       extracted_json, status: str = "done") -> None:
+                       extracted_json, status: str = "done", embedding=None) -> None:
     """Write pipeline results back onto an existing (claimed) row."""
-    get_client().table(TABLE).update({
+    payload = {
         "title": title,
         "raw_transcript": raw_transcript,
         "post_caption": post_caption,
@@ -190,7 +205,10 @@ def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
         "error": None,
         "processing_started_at": None,
         "next_attempt_at": None,
-    }).eq("id", reel_id).execute()
+    }
+    if embedding is not None:
+        payload["embedding"] = embedding
+    get_client().table(TABLE).update(payload).eq("id", reel_id).execute()
 
 
 def mark_failed(reel_id: str, error, status: str = "failed") -> None:

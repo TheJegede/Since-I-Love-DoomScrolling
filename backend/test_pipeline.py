@@ -65,6 +65,45 @@ class FakeTable:
         return type("Result", (), {"data": self.data})()
 
 
+class RecordingTable:
+    """Stand-in for a Supabase table query that records payloads and filters."""
+    def __init__(self, rows=None):
+        self.rows = rows or []
+        self.payloads = []
+        self.filters = []
+        self.window = (0, 999)
+
+    def select(self, *args, **kwargs):
+        return self
+
+    def insert(self, payload):
+        self.payloads.append(payload)
+        return self
+
+    def update(self, payload):
+        self.payloads.append(payload)
+        return self
+
+    def eq(self, *args):
+        self.filters.append(("eq", args))
+        return self
+
+    def is_(self, *args):
+        self.filters.append(("is", args))
+        return self
+
+    def order(self, *args, **kwargs):
+        return self
+
+    def range(self, start, end):
+        self.window = (start, end)
+        return self
+
+    def execute(self):
+        start, end = self.window
+        return type("Result", (), {"data": self.rows[start:end + 1]})()
+
+
 @pytest.fixture
 def pipeline(monkeypatch):
     """Mock download, transcription and extraction so the pipeline runs offline."""
@@ -498,3 +537,33 @@ def test_db_queue_metadata_contract(monkeypatch):
     assert db.recover_stale_processing(datetime.now(timezone.utc)) == 1
     assert ("eq", ("status", "processing")) in query.calls
     assert any(kind == "lt" and args[0] == "processing_started_at" for kind, args in query.calls)
+
+
+def test_insert_reel_stores_embedding_only_when_given(monkeypatch):
+    table = RecordingTable()
+    monkeypatch.setattr(db, "get_client", fake_client(table))
+    record = db.insert_reel("u", "t", "tr", "cap", {"core_topic": "x"}, embedding=[0.1, 0.2])
+    db.insert_reel("u2", "t", "tr", "cap", {"core_topic": "x"})
+    assert table.payloads[0]["embedding"] == [0.1, 0.2]
+    assert "embedding" not in table.payloads[1]
+    assert "embedding" not in record  # never leaks into the API record
+
+
+def test_update_reel_result_stores_embedding_only_when_given(monkeypatch):
+    table = RecordingTable()
+    monkeypatch.setattr(db, "get_client", fake_client(table))
+    db.update_reel_result("r1", "t", "tr", "cap", {"core_topic": "x"}, embedding=[0.3])
+    db.update_reel_result("r2", "t", "tr", "cap", {"core_topic": "x"})
+    assert table.payloads[0]["embedding"] == [0.3]
+    assert "embedding" not in table.payloads[1]
+
+
+def test_embedding_queue_helpers(monkeypatch):
+    table = RecordingTable([{"id": "a", "extracted_json": {}}, {"id": "b", "extracted_json": {}}])
+    monkeypatch.setattr(db, "get_client", fake_client(table))
+    assert [row["id"] for row in db.reels_missing_embedding()] == ["a", "b"]
+    assert ("is", ("embedding", "null")) in table.filters
+
+    db.set_embedding("a", [0.5])
+    assert table.payloads == [{"embedding": [0.5]}]
+    assert ("eq", ("id", "a")) in table.filters
