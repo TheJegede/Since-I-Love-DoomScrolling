@@ -32,16 +32,15 @@ export default function ReelCard({ reel, onSelect, handleDelete, onRetry, checke
 
   return (
     <article 
-      className="glass glass-interactive reel-card" 
+      className={`glass glass-interactive reel-card${reel.status && reel.status !== 'done' ? ' reel-card--unfinished' : ''}`}
       onClick={() => onSelect(reel)}
-      style={{ opacity: reel.status && reel.status !== 'done' ? 0.9 : 1 }}
     >
       <div className="card-header">
-        <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+        <div className="card-badges">
           <span className="card-topic-badge">{topic.toUpperCase()}</span>
           {mainTool && <span className="card-tool-badge">{mainTool}</span>}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <div className="card-meta">
           <span className="card-date">{formatDate(reel.created_at)}</span>
           <button 
             className="delete-btn" 
@@ -78,8 +77,7 @@ export default function ReelCard({ reel, onSelect, handleDelete, onRetry, checke
         </span>
         {['failed', 'cookies_expired', 'unsupported_format'].includes(reel.status) && onRetry && (
           <button
-            className="alt-input-btn"
-            style={{ fontSize: '0.75rem', padding: '0.25rem 0.55rem' }}
+            className="alt-input-btn card-retry-btn"
             onClick={(e) => onRetry(reel.id, e)}
           >
             <RefreshCw size={12} /> Retry

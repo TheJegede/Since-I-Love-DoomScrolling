@@ -270,40 +270,38 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
               ref={fileInputRef} 
               onChange={handleFileSelect} 
               accept="audio/*" 
-              style={{ display: 'none' }} 
+              className="file-input" 
             />
-            <UploadCloud size={40} className="empty-state-icon" style={{ margin: '0 auto 1rem auto' }} />
+            <UploadCloud size={40} className="empty-state-icon" />
             {file ? (
               <div>
-                <p style={{ fontWeight: '600', color: 'var(--accent-primary)' }}>{file.name}</p>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                <p className="upload-file-name">{file.name}</p>
+                <p className="upload-meta">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
               </div>
             ) : (
               <div>
-                <p style={{ fontWeight: '600' }}>Drag & drop audio file or click to browse</p>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>MP3, WAV, M4A up to 25MB</p>
+                <p className="upload-prompt">Drag & drop audio file or click to browse</p>
+                <p className="upload-meta upload-meta--spaced">MP3, WAV, M4A up to 25MB</p>
               </div>
             )}
           </div>
 
           {file && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginBottom: '1.5rem' }}>
+            <div className="form-stack form-stack--spaced">
               <input 
                 type="text" 
-                className="url-input" 
-                style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem' }}
+                className="url-input field"
                 placeholder="Audio Title (e.g. Email Automation tips)"
                 value={fileTitle}
                 onChange={(e) => setFileTitle(e.target.value)}
               />
               <textarea
-                className="url-input"
-                style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem', minHeight: '80px' }}
+                className="url-input field field--caption"
                 placeholder="Post Caption Description (Optional metadata helper)"
                 value={fileCaption}
                 onChange={(e) => setFileCaption(e.target.value)}
               />
-              <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isLoading}>
+              <button type="submit" className="btn-primary btn-start" disabled={isLoading}>
                 {isLoading ? "EXTRACTING..." : "PROCESS AUDIO FILE"}
               </button>
             </div>
@@ -313,28 +311,27 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
 
       {mode === 'text' && (
         <form onSubmit={handleTextSubmit}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          <div className="form-stack">
             <input 
               type="text" 
-              className="url-input" 
-              style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem' }}
+              className="url-input field"
               placeholder="Topic Title (e.g. AI workflows)"
               value={textTitle}
               onChange={(e) => setTextTitle(e.target.value)}
             />
             <textarea
-              style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem', height: '80px', color: 'var(--text-primary)', fontFamily: 'inherit', resize: 'vertical' }}
+              className="field field--plain field--short"
               placeholder="Instagram Post Caption / Description"
               value={textCaption}
               onChange={(e) => setTextCaption(e.target.value)}
             />
             <textarea
-              style={{ background: 'var(--bg-input)', border: '1px solid var(--glass-border)', borderRadius: 'var(--radius-sm)', padding: '0.6rem 0.8rem', height: '140px', color: 'var(--text-primary)', fontFamily: 'inherit', resize: 'vertical' }}
+              className="field field--plain field--tall"
               placeholder="Audio Transcript (Paste voice transcript if available)"
               value={textTranscript}
               onChange={(e) => setTextTranscript(e.target.value)}
             />
-            <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start' }} disabled={isLoading}>
+            <button type="submit" className="btn-primary btn-start" disabled={isLoading}>
               {isLoading ? "RUNNING LLM..." : "EXTRACT INSIGHTS"}
             </button>
           </div>
@@ -355,41 +352,39 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
               ref={batchInputRef} 
               onChange={handleBatchSelect} 
               accept="application/json,.json" 
-              style={{ display: 'none' }} 
+              className="file-input" 
             />
-            <UploadCloud size={40} className="empty-state-icon" style={{ margin: '0 auto 1rem auto' }} />
+            <UploadCloud size={40} className="empty-state-icon" />
             {batchFile ? (
               <div>
-                <p style={{ fontWeight: '600', color: 'var(--accent-primary)' }}>{batchFile.name}</p>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{(batchFile.size / 1024).toFixed(0)} KB</p>
+                <p className="upload-file-name">{batchFile.name}</p>
+                <p className="upload-meta">{(batchFile.size / 1024).toFixed(0)} KB</p>
               </div>
             ) : (
               <div>
-                <p style={{ fontWeight: '600' }}>Upload your Instagram saved_posts.json</p>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>From "Download Your Information" → Saved (JSON). Reels only; photos skipped.</p>
+                <p className="upload-prompt">Upload your Instagram saved_posts.json</p>
+                <p className="upload-meta upload-meta--spaced">From "Download Your Information" → Saved (JSON). Reels only; photos skipped.</p>
               </div>
             )}
           </div>
 
-          <button type="submit" className="btn-primary" style={{ alignSelf: 'flex-start', marginTop: '1rem' }} disabled={isLoading || isBatchRunning || !batchFile}>
+          <button type="submit" className="btn-primary btn-start btn-start--spaced" disabled={isLoading || isBatchRunning || !batchFile}>
             {isBatchRunning ? "IMPORTING..." : "START BULK IMPORT"}
           </button>
 
           {batchJob && (
-            <div style={{ marginTop: '1.5rem' }}>
-              <div style={{ height: '8px', background: 'var(--bg-input)', borderRadius: '4px', overflow: 'hidden' }}>
-                <div style={{
-                  height: '100%',
-                  width: `${batchJob.total ? Math.round((batchJob.done / batchJob.total) * 100) : 0}%`,
-                  background: 'var(--accent-primary)',
-                  transition: 'width 0.4s ease'
-                }} />
+            <div className="batch-progress">
+              <div className="batch-progress-track">
+                <div
+                  className="batch-progress-fill"
+                  style={{ width: `${batchJob.total ? Math.round((batchJob.done / batchJob.total) * 100) : 0}%` }}
+                />
               </div>
-              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+              <p className="batch-progress-status">
                 {batchJob.status === 'running' ? 'Running' : batchJob.status === 'done' ? 'Done' : batchJob.status} — {batchJob.done}/{batchJob.total} · ok {batchJob.ok} · failed {batchJob.failed}
               </p>
               {batchJob.current && batchJob.status === 'running' && (
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', wordBreak: 'break-all' }}>Now: {batchJob.current}</p>
+                <p className="batch-progress-current">Now: {batchJob.current}</p>
               )}
             </div>
           )}
@@ -401,7 +396,7 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
         <div className="progress-container">
           <div className="progress-header">
             <span>Pipeline Stage Executing:</span>
-            <span style={{ color: 'var(--accent-primary)' }}>Stage {currentStep} of 6</span>
+            <span className="progress-stage">Stage {currentStep} of 6</span>
           </div>
           <div className="step-tracker">
             {STEPS.map((s) => (

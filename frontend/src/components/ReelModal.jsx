@@ -4,6 +4,12 @@ import {
 } from 'lucide-react';
 import { formatDate } from '../formatDate';
 
+const FAILURE_BANNERS = {
+  cookies_expired: { tone: 'warning', title: 'Authentication Required' },
+  unsupported_format: { tone: 'info', title: 'Unsupported Format' },
+};
+const DEFAULT_FAILURE_BANNER = { tone: 'danger', title: 'Extraction Failed' };
+
 export default function ReelModal({
   reel,
   onClose,
@@ -23,6 +29,7 @@ export default function ReelModal({
   };
 
   const details = reel.extracted_json || {};
+  const failure = FAILURE_BANNERS[reel.status] || DEFAULT_FAILURE_BANNER;
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="glass modal-content" onClick={(e) => e.stopPropagation()}>
@@ -31,10 +38,10 @@ export default function ReelModal({
         </button>
 
         <div className="modal-header-meta">
-          <span className="card-topic-badge" style={{ fontSize: '0.8rem', padding: '0.35rem 0.85rem' }}>
+          <span className="card-topic-badge modal-topic-badge">
             {(details.core_topic || 'REEL').toUpperCase()}
           </span>
-          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+          <span className="modal-processed-on">
             Processed on {formatDate(reel.created_at)}
           </span>
           {reel.url && (
@@ -42,15 +49,13 @@ export default function ReelModal({
               href={reel.url}
               target="_blank"
               rel="noreferrer"
-              className="alt-input-btn"
-              style={{ fontSize: '0.85rem' }}
+              className="alt-input-btn modal-meta-btn"
             >
               View Original <ExternalLink size={14} />
             </a>
           )}
           <button
-            className="alt-input-btn delete-btn"
-            style={{ fontSize: '0.85rem' }}
+            className="alt-input-btn delete-btn modal-meta-btn"
             onClick={(e) => handleDelete(reel.id, e)}
           >
             Delete <Trash2 size={14} />
@@ -62,68 +67,27 @@ export default function ReelModal({
         {reel.status && reel.status !== 'done' && (
           <div className="modal-section">
             {['pending', 'processing'].includes(reel.status) ? (
-              <div className="info-banner" style={{
-                padding: '1rem',
-                borderRadius: 'var(--radius-sm)',
-                background: 'rgba(59, 130, 246, 0.1)',
-                border: '1px solid var(--accent-primary)',
-                color: 'var(--text-primary)',
-                fontSize: '0.9rem',
-                marginBottom: '1.5rem',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.5rem'
-              }}>
-                <span style={{ 
-                  fontWeight: '700', 
-                  color: 'var(--accent-primary)', 
-                  textTransform: 'uppercase',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem'
-                }}>
+              <div className="status-banner status-banner--queue">
+                <span className="status-banner-title">
                   {reel.status === 'processing' ? 'Processing Reel' : 'In Ingestion Queue'}
                 </span>
-                <p style={{ margin: 0 }}>
-                  {reel.status === 'processing' 
-                    ? 'The local worker is currently transcribing and extracting insights for this Reel. Please wait a moment...' 
+                <p className="status-banner-text">
+                  {reel.status === 'processing'
+                    ? 'The local worker is currently transcribing and extracting insights for this Reel. Please wait a moment...'
                     : 'This Reel is waiting in the queue to be processed. The local queue worker will pick it up shortly.'}
                 </p>
               </div>
             ) : (
-              <div className={`error-banner ${reel.status === 'cookies_expired' ? 'warning' : reel.status === 'unsupported_format' ? 'info' : 'danger'}`} style={{
-                padding: '1rem',
-                borderRadius: 'var(--radius-sm)',
-                background: reel.status === 'cookies_expired' ? 'rgba(245, 158, 11, 0.15)' : reel.status === 'unsupported_format' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                border: `1px solid ${reel.status === 'cookies_expired' ? '#f59e0b' : reel.status === 'unsupported_format' ? '#3b82f6' : '#ef4444'}`,
-                color: 'var(--text-primary)',
-                fontSize: '0.9rem',
-                marginBottom: '1.5rem',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '0.5rem'
-              }}>
-                <span style={{ 
-                  fontWeight: '700', 
-                  color: reel.status === 'cookies_expired' ? '#f59e0b' : reel.status === 'unsupported_format' ? '#3b82f6' : '#ef4444', 
-                  textTransform: 'uppercase',
-                  fontSize: '0.8rem'
-                }}>
-                  {reel.status === 'cookies_expired' ? 'Authentication Required' : reel.status === 'unsupported_format' ? 'Unsupported Format' : 'Extraction Failed'}
-                </span>
-                <p style={{ margin: 0 }}>{reel.error || 'An unknown error occurred during pipeline execution.'}</p>
+              <div className={`status-banner status-banner--${failure.tone}`}>
+                <span className="status-banner-title">{failure.title}</span>
+                <p className="status-banner-text">{reel.error || 'An unknown error occurred during pipeline execution.'}</p>
                 {onRetry && (
-                  <button
-                    className="alt-input-btn"
-                    style={{ alignSelf: 'flex-start', fontSize: '0.8rem' }}
-                    onClick={(e) => onRetry(reel.id, e)}
-                  >
+                  <button className="alt-input-btn status-banner-retry" onClick={(e) => onRetry(reel.id, e)}>
                     <RefreshCw size={14} /> Retry extraction
                   </button>
                 )}
                 {reel.status === 'cookies_expired' && (
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                  <div className="status-banner-help">
                     <strong>How to fix:</strong> Log into Instagram in your browser, export your session cookies to <code>cookies.txt</code> using a browser extension, and save it at <code>backend/cookies.txt</code>.
                   </div>
                 )}
@@ -135,7 +99,7 @@ export default function ReelModal({
         {details.key_takeaway && (
           <div className="modal-section">
             <div className="takeaway-banner">
-              <span style={{ fontWeight: '700', color: 'var(--accent-primary)', display: 'block', marginBottom: '0.25rem', fontSize: '0.85rem', textTransform: 'uppercase' }}>
+              <span className="takeaway-label">
                 Core Key Takeaway
               </span>
               {details.key_takeaway}
@@ -158,13 +122,13 @@ export default function ReelModal({
                       onChange={() => toggleCheckAction(reel.id, index)}
                     />
                     <span className="action-text">{item}</span>
-                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                      {copiedText === `action-${index}` && <span style={{ fontSize: '0.7rem', color: 'var(--accent-success)', fontWeight: 'bold' }}>COPIED</span>}
+                    <div className="copy-cluster copy-cluster--end">
+                      {copiedText === `action-${index}` && <span className="copied-label">COPIED</span>}
                       <button
                         onClick={() => handleCopy(item, `action-${index}`)}
-                        style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
+                        className="copy-btn"
                       >
-                        {copiedText === `action-${index}` ? <Check size={14} style={{ color: 'var(--accent-success)' }} /> : <Copy size={14} />}
+                        {copiedText === `action-${index}` ? <Check size={14} className="copied-icon" /> : <Copy size={14} />}
                       </button>
                     </div>
                   </div>
@@ -181,13 +145,13 @@ export default function ReelModal({
               {details.tools_or_resources.map((tool, idx) => (
                 <div key={idx} className="tool-tag">
                   <span>{tool}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                    {copiedText === `tool-${idx}` && <span style={{ fontSize: '0.65rem', color: 'var(--accent-success)', fontWeight: 'bold' }}>COPIED</span>}
+                  <div className="copy-cluster">
+                    {copiedText === `tool-${idx}` && <span className="copied-label copied-label--small">COPIED</span>}
                     <button
                       onClick={() => handleCopy(tool, `tool-${idx}`)}
-                      style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}
+                      className="copy-btn copy-btn--flex"
                     >
-                      {copiedText === `tool-${idx}` ? <Check size={12} style={{ color: 'var(--accent-success)' }} /> : <Copy size={12} className="tool-copy-icon" />}
+                      {copiedText === `tool-${idx}` ? <Check size={12} className="copied-icon" /> : <Copy size={12} className="tool-copy-icon" />}
                     </button>
                   </div>
                 </div>
@@ -197,10 +161,10 @@ export default function ReelModal({
         )}
 
         {reel.raw_transcript && (
-          <div className="modal-section" style={{ marginBottom: '1rem' }}>
+          <div className="modal-section modal-section--tight">
             <div className="transcript-accordion">
               <button className="accordion-trigger" onClick={() => setIsTranscriptOpen(!isTranscriptOpen)}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><FileAudio size={16} /> Voice Transcript</span>
+                <span className="accordion-label"><FileAudio size={16} /> Voice Transcript</span>
                 <ChevronDown className={`accordion-chevron ${isTranscriptOpen ? 'open' : ''}`} size={16} />
               </button>
               {isTranscriptOpen && (
@@ -211,10 +175,10 @@ export default function ReelModal({
         )}
 
         {reel.post_caption && (
-          <div className="modal-section" style={{ marginBottom: '0' }}>
+          <div className="modal-section modal-section--last">
             <div className="transcript-accordion">
               <button className="accordion-trigger" onClick={() => setIsCaptionOpen(!isCaptionOpen)}>
-                <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}><Info size={16} /> Post Caption / Metadata</span>
+                <span className="accordion-label"><Info size={16} /> Post Caption / Metadata</span>
                 <ChevronDown className={`accordion-chevron ${isCaptionOpen ? 'open' : ''}`} size={16} />
               </button>
               {isCaptionOpen && (
