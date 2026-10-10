@@ -22,6 +22,7 @@ Educational and tool-focused short-form videos are full of high-density, actiona
 | **AI Extraction** | Groq Whisper transcribes audio; a Groq-hosted LLM (with automatic model fallback) extracts structured JSON insights |
 | **Clustering** | Emergent topic clustering groups your reels into themes automatically |
 | **Live Dashboard** | Filter by cluster, tool, date, or keyword — all in-memory, instant |
+| **Smart Search** | Search by meaning, not just exact words — the query is embedded in the browser and matched in Supabase (pgvector) |
 | **Delete** | Remove any reel from the dashboard and database in one click |
 
 ---
@@ -253,6 +254,7 @@ python -m pytest backend    # needs: pip install -r backend/requirements-dev.txt
 
 # Inspect the Supabase queue (pending/failed rows)
 python backend/check_queue.py
+python backend/backfill_embeddings.py
 
 # --- Frontend ---
 
@@ -317,6 +319,7 @@ Transcriber/
 │   ├── run_worker.py        # Standalone queue worker
 │   ├── saved_parser.py      # Instagram saved_posts.json parser
 │   ├── check_queue.py       # Queue diagnostic tool
+│   ├── backfill_embeddings.py  # Fingerprint reels missing a search embedding
 │   ├── test_pipeline.py     # Pytest suite (mocked)
 │   ├── run_local.ps1        # Dev startup script (Windows)
 │   ├── Dockerfile           # HF Spaces container

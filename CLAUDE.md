@@ -45,22 +45,24 @@ Key behaviors to preserve when editing:
 - **Models:** Whisper `whisper-large-v3-turbo`; LLM `GROQ_LLM_MODEL` (default `openai/gpt-oss-120b`) with `GROQ_LLM_FALLBACK_MODELS` tried in order. `_chat_json` owns that failover loop for both extraction and cluster naming. See `ERRORS.md` for why the models changed.
 - **Cookies:** Instagram blocks anonymous scraping. `get_cookie_file` searches common paths for `cookies.txt`; mount an exported browser session to bypass 403/rate-limit errors. Cookies expire → re-export when IG 403s. Absence is non-fatal.
 - **Transcription failures:** the worker re-raises a failed transcription so the reel is retried with backoff; only its final attempt (and the synchronous `/extract/url` path) falls back to a caption-only extraction.
+- **Search embeddings:** every save path stores `embed_reel(extracted_json)` (local fastembed over topic + takeaway + tools) in the `embedding` column. It never raises — a reel saves without one and `backfill_embeddings.py` repairs it later. The browser embeds queries with the same model (`Xenova/all-MiniLM-L6-v2`, q8) in `frontend/src/queryEmbedder.js`; changing `EMBEDDING_MODEL_NAME` or the browser model means re-embedding every reel.
 - **Temp files** are always cleaned up in a `finally` block.
 
 ### Data layer (`backend/db.py`)
-Every DB op lives here. Backend authenticates with the Supabase **service role** key (bypasses RLS) — must only run on a trusted machine. `row_to_record` maps raw rows to the API shape the frontend expects. Queue primitives: `claim_next_pending`, `update_reel_result`, `mark_failed`, `schedule_retry`, `recover_stale_processing`, `retry_reel`. Supabase returns at most 1000 rows per request, so full-table reads page (`_select_newest_first`) and `in` filters are chunked. The legacy `backend/local_storage.db` SQLite file is **unused** (pre-migration artifact).
+Every DB op lives here. Backend authenticates with the Supabase **service role** key (bypasses RLS) — must only run on a trusted machine. `row_to_record` maps raw rows to the API shape the frontend expects. Queue primitives: `claim_next_pending`, `update_reel_result`, `mark_failed`, `schedule_retry`, `recover_stale_processing`, `retry_reel`. Search embeddings: `reels_missing_embedding`, `set_embedding`, and the optional `embedding` argument on `insert_reel` / `update_reel_result`. Supabase returns at most 1000 rows per request, so full-table reads page (`_select_newest_first`) and `in` filters are chunked. The legacy `backend/local_storage.db` SQLite file is **unused** (pre-migration artifact).
 
 ### Frontend (`frontend/src/`)
 - `App.jsx` — shell: loads reels, owns search/cluster/tool/date filters, pagination, the selected reel, and cluster recompute. The cluster list is derived from the loaded reels.
 - `components/IngestionPanel.jsx` — owns the four ingestion modes (URL / file upload / text paste / **bulk** `saved_posts.json` with status polling + progress bar) and reports results up through `onIngested` / `onError` / `onBatchFinished`.
 - `components/ReelModal.jsx`, `ReelCard.jsx`, `InsightsTable.jsx`, `Skeletons.jsx` — presentation. Queued (`pending`/`processing`) and failed reels render as placeholders/banners.
 - `api.js` — `API_BASE_URL` (`VITE_API_URL`, else `http://localhost:8000` on localhost, else same-origin) and `fetchWithAuth` (adds `X-API-Key`, prompts for it on a 401).
+- `semanticSearch.js` — `rankReels` (exact-word matches first, then meaning matches) and `useSemanticSearch` (embeds the query in the browser via `queryEmbedder.js`, then calls the Supabase `match_reels` function). Without Supabase config, search is exact-word only.
 
 Two data channels:
 - **Reads** — if the `supabase` client is configured (`VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`), `fetchAllReelRows` pages through the whole table via supabase-js. Falls back to `GET /reels` otherwise.
 - **Writes** — ingestion, `/clusters/recompute`, retry and delete go through `API_BASE_URL`.
 
-All filters run **in-memory** over `filteredReels`. Checks `/health` on load for backend warm-up and re-fetches every 5s while any reel is queued. Styles live in `index.css` (tokens + base) and `App.css` (layout + components); avoid inline `style` except for values computed at runtime.
+Cluster/tool/date filters and exact-word search run **in-memory**; meaning matches come from Supabase (`match_reels`) and are merged in by `rankReels`. A status line under the search bar says when smart search is still loading or unavailable. Checks `/health` on load for backend warm-up and re-fetches every 5s while any reel is queued. Styles live in `index.css` (tokens + base) and `App.css` (layout + components); avoid inline `style` except for values computed at runtime.
 
 ## Commands
 
@@ -80,6 +82,9 @@ python -m pytest backend
 
 # Inspect the Supabase queue (pending/processing/failed rows)
 python backend/check_queue.py
+
+# Fingerprint reels that have no search embedding yet (safe to re-run)
+python backend/backfill_embeddings.py
 ```
 
 ffmpeg must be on PATH for url/file ingestion (winget `Gyan.FFmpeg` is not on PATH by default — `main.py` prepends it when found). Cluster recompute needs `fastembed` and `scikit-learn` from `requirements.txt`; an older venv may be missing them.
@@ -105,6 +110,7 @@ Gotchas:
 - HF Space cold-starts take 30–60s after idle; first share may time out — retry.
 - Supabase rejects the `sb_secret_` service key from PowerShell (detects browser context). Use Python + `db.py` for admin queries.
 - New REST-inserted rows (iPhone Shortcut) need the `id` column to default to `gen_random_uuid()` in Supabase (Python inserts always supply a UUID, so the default matters only for REST).
+- Semantic search needs the `embedding vector(384)` column and the `match_reels` SQL function in Supabase (SQL in `docs/superpowers/specs/2026-10-10-semantic-search-design.md`). The column must exist before backend code that writes it runs.
 
 Deploy targets:
 - **Backend:** Hugging Face Spaces (free CPU Docker). `backend/Dockerfile` installs ffmpeg, runs as user 1000, exposes port **7860** (HF default — differs from local's 8000). Live: `https://whoisluwah-transcriber.hf.space`. *Note:* IG blocks HF/datacenter IPs, so reel downloads must run on the local worker, not HF.
