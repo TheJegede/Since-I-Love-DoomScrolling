@@ -13,6 +13,7 @@ from typing import Optional
 from supabase import create_client, Client
 
 TABLE = "saved_reels"
+FAILURE_STATUSES = frozenset({"failed", "cookies_expired", "unsupported_format"})
 _client: Optional[Client] = None
 
 
@@ -26,6 +27,26 @@ def get_client() -> Client:
             raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_KEY must be set.")
         _client = create_client(url, key)
     return _client
+
+
+def _chunked(seq: list, size: int):
+    """Yield successive size-length slices of a sequence."""
+    for i in range(0, len(seq), size):
+        yield seq[i:i + size]
+
+
+def _select_newest_first(columns: str, limit: Optional[int] = None) -> list:
+    """Select rows newest-first, paging past PostgREST's per-request row cap."""
+    rows = []
+    while limit is None or len(rows) < limit:
+        last = len(rows) + 999 if limit is None else limit - 1
+        page = (get_client().table(TABLE).select(columns)
+                .order("created_at", desc=True).order("id")
+                .range(len(rows), last).execute().data or [])
+        if not page:
+            break
+        rows.extend(page)
+    return rows
 
 
 def row_to_record(r: dict) -> dict:
@@ -74,17 +95,37 @@ def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
 
 
 def list_reels(limit: int = 20) -> list:
+    columns = "id, url, title, extracted_json, created_at, cluster, status, error"
+    return [row_to_record(r) for r in _select_newest_first(columns, limit)]
+
+
+def statuses_for_urls(urls: list) -> list:
+    """Return [{url, status, error}] for whichever of the given URLs exist."""
     rows = []
-    while len(rows) < limit:
-        # PostgREST caps rows per request, so page until the limit is reached.
-        page = (get_client().table(TABLE)
-                .select("id, url, title, extracted_json, created_at, cluster, status, error")
-                .order("created_at", desc=True).order("id")
-                .range(len(rows), limit - 1).execute().data or [])
-        if not page:
-            break
-        rows.extend(page)
-    return [row_to_record(r) for r in rows]
+    for chunk in _chunked(urls, 100):
+        res = get_client().table(TABLE).select("url", "status", "error").in_("url", chunk).execute()
+        rows.extend(res.data or [])
+    return rows
+
+
+def insert_pending_reels(reels: list, source: str) -> None:
+    """Enqueue parsed [{url, title, caption}] reels as pending rows for the worker."""
+    rows = [
+        {
+            "id": str(uuid.uuid4()),
+            "url": r["url"],
+            "title": r["title"] or f"Reel ({r['url'].split('/reel/')[-1].replace('/', '')})",
+            "raw_transcript": "",
+            "post_caption": r["caption"],
+            "extracted_json": {},
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "status": "pending",
+            "source": source,
+        }
+        for r in reels
+    ]
+    for chunk in _chunked(rows, 50):
+        get_client().table(TABLE).insert(chunk).execute()
 
 
 def get_reel_details(reel_id: str) -> Optional[dict]:
@@ -95,12 +136,12 @@ def get_reel_details(reel_id: str) -> Optional[dict]:
 
 
 def reels_for_clustering() -> list:
-    res = get_client().table(TABLE).select("id, extracted_json").execute()
-    return res.data or []
+    return _select_newest_first("id, extracted_json")
 
 
-def set_cluster(reel_id: str, cluster: str) -> None:
-    get_client().table(TABLE).update({"cluster": cluster}).eq("id", reel_id).execute()
+def set_cluster(reel_ids: list, cluster: str) -> None:
+    for chunk in _chunked(reel_ids, 100):
+        get_client().table(TABLE).update({"cluster": cluster}).in_("id", chunk).execute()
 
 
 def delete_reel(reel_id: str) -> bool:
@@ -152,22 +193,14 @@ def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
     }).eq("id", reel_id).execute()
 
 
-def mark_failed_with_status(reel_id: str, error, status: str = "failed") -> None:
-    """Mark a claimed row with a specific failure status, recording a truncated error message."""
+def mark_failed(reel_id: str, error, status: str = "failed") -> None:
+    """Mark a claimed row with a failure status, recording a truncated error message."""
     get_client().table(TABLE).update({
         "status": status,
         "error": str(error)[:500],
         "processing_started_at": None,
         "next_attempt_at": None,
     }).eq("id", reel_id).execute()
-
-
-def mark_failed(reel_id: str, error) -> None:
-    """Mark a claimed row failed, recording a truncated error message."""
-    mark_failed_with_status(reel_id, error, "failed")
-
-
-RETRYABLE_FAILURE_STATUSES = frozenset({"failed", "cookies_expired", "unsupported_format"})
 
 
 def retry_reel(reel_id: str) -> bool:
@@ -178,7 +211,7 @@ def retry_reel(reel_id: str) -> bool:
         "processing_started_at": None,
         "next_attempt_at": None,
         "attempt_count": 0,
-    }).eq("id", reel_id).in_("status", list(RETRYABLE_FAILURE_STATUSES)).execute()
+    }).eq("id", reel_id).in_("status", list(FAILURE_STATUSES)).execute()
     return bool(res.data)
 
 def recover_stale_processing(stale_before: datetime) -> int:

@@ -11,7 +11,7 @@ c.table('saved_reels').delete().eq('url', 'https://www.instagram.com/reel/DIAGTE
 print('Test row deleted.')
 
 # Show any non-done rows
-res = c.table('saved_reels').select('id,url,status,source,created_at,error,attempt_count,processing_started_at,next_attempt_at').in_('status', ['pending','processing','failed','cookies_expired','unsupported_format']).order('created_at', desc=True).limit(10).execute()
+res = c.table('saved_reels').select('id,url,status,source,created_at,error,attempt_count,processing_started_at,next_attempt_at').in_('status', ['pending', 'processing', *db.FAILURE_STATUSES]).order('created_at', desc=True).limit(10).execute()
 rows = res.data or []
 print(f'Non-done rows in queue: {len(rows)}')
 for r in rows:

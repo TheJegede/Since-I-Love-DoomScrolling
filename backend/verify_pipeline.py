@@ -86,7 +86,7 @@ def test_recompute_clusters_mock():
     orig_set = main.db.set_cluster
     orig_llm = main.cluster_topics_semantically
     main.db.reels_for_clustering = lambda: fake_rows
-    main.db.set_cluster = lambda rid, cluster: applied.append((rid, cluster))
+    main.db.set_cluster = lambda reel_ids, cluster: applied.extend((rid, cluster) for rid in reel_ids)
     main.cluster_topics_semantically = lambda items: [
         {"id": "a", "cluster": "Productivity"}, {"id": "b", "cluster": "Fitness"}]
     try:
@@ -202,15 +202,13 @@ def test_worker_tick_failure():
     import main
     from fastapi import HTTPException
     captured = {}
-    orig = (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed, main.db.mark_failed_with_status)
+    orig = (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed)
     main.db.claim_next_pending = lambda: {"id": "row2", "url": "https://www.instagram.com/reel/F/"}
     def _boom(url):
         raise HTTPException(status_code=400, detail="Meta blocking request")
     main.download_and_extract_audio = _boom
     
-    mock_mark = lambda reel_id, error, status="failed": captured.update({"id": reel_id, "error": str(error), "status": status})
-    main.db.mark_failed = lambda reel_id, error: mock_mark(reel_id, error)
-    main.db.mark_failed_with_status = mock_mark
+    main.db.mark_failed = lambda reel_id, error, status="failed": captured.update({"id": reel_id, "error": str(error), "status": status})
     try:
         did = main.worker_tick()
         assert did is True
@@ -218,7 +216,7 @@ def test_worker_tick_failure():
         assert "Meta blocking" in captured["error"]
         print("[OK] worker_tick failure passed!")
     finally:
-        (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed, main.db.mark_failed_with_status) = orig
+        (main.db.claim_next_pending, main.download_and_extract_audio, main.db.mark_failed) = orig
 
 
 def test_worker_tick_empty():
@@ -300,7 +298,7 @@ def test_cors_no_credentials():
 
 def test_chunked_helper():
     print("Testing _chunked splits sequences into fixed-size lists...")
-    from main import _chunked
+    from db import _chunked
     assert list(_chunked([1, 2, 3, 4, 5], 2)) == [[1, 2], [3, 4], [5]]
     assert list(_chunked([], 3)) == []
     assert list(_chunked([1, 2], 5)) == [[1, 2]]
@@ -342,7 +340,7 @@ def test_batch_guard_409():
     import main, io
     prev = dict(main.BATCH_JOB)
     main.BATCH_JOB["status"] = "running"
-    async def fake_update():
+    def fake_update():
         pass
     orig_update = main.update_batch_job_status
     main.update_batch_job_status = fake_update
@@ -579,7 +577,7 @@ def test_api_auth_token_check():
 
 def test_batch_terminal_statuses():
     print("Testing all terminal and unknown batch statuses...")
-    import asyncio, main
+    import main
     original_client = main.db.get_client
     previous = dict(main.BATCH_JOB)
 
@@ -595,7 +593,7 @@ def test_batch_terminal_statuses():
             query.status = status
             main.db.get_client = lambda q=query: type("Client", (), {"table": lambda self, name: q})()
             main.BATCH_JOB.update({"status": "running", "urls": ["u"], "finished_at": None})
-            asyncio.run(main.update_batch_job_status())
+            main.update_batch_job_status()
             assert main.BATCH_JOB["status"] == "done"
             assert main.BATCH_JOB["failed"] == 1
             if status == "mystery":

@@ -370,12 +370,6 @@ def cluster_topics_semantically(items: List[dict]) -> List[dict]:
     ]
 
 
-def _chunked(seq: list, size: int):
-    """Yield successive size-length slices of a sequence."""
-    for i in range(0, len(seq), size):
-        yield seq[i:i + size]
-
-
 # Helper functions
 def is_valid_instagram_reel(url: str) -> bool:
     if not url:
@@ -661,7 +655,6 @@ CLUSTER_JOB = {
 
 
 def run_cluster_recompute_task():
-    global CLUSTER_JOB
     CLUSTER_JOB.update({
         "status": "running",
         "started_at": datetime.now(timezone.utc).isoformat(),
@@ -688,13 +681,12 @@ def run_cluster_recompute_task():
                     ej = {}
             items.append({"id": r["id"], "topic": (ej or {}).get("core_topic", ""), "takeaway": (ej or {}).get("key_takeaway", "")})
 
-        assignments = cluster_topics_semantically(items)
-        valid_ids = {r["id"] for r in rows}
-        applied = 0
-        for a in assignments:
-            if a.get("id") in valid_ids and a.get("cluster"):
-                db.set_cluster(a["id"], a["cluster"])
-                applied += 1
+        ids_by_cluster = {}
+        for assignment in cluster_topics_semantically(items):
+            ids_by_cluster.setdefault(assignment["cluster"], []).append(assignment["id"])
+        for cluster, reel_ids in ids_by_cluster.items():
+            db.set_cluster(reel_ids, cluster)
+        applied = sum(len(reel_ids) for reel_ids in ids_by_cluster.values())
 
         logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
         CLUSTER_JOB.update({
@@ -819,12 +811,12 @@ def process_pending_reel(row: dict) -> None:
             status = "cookies_expired"
         elif e.status_code == 415:
             status = "unsupported_format"
-        db.mark_failed_with_status(reel_id, e.detail, status)
+        db.mark_failed(reel_id, e.detail, status)
     except Exception as e:
         logger.error(f"Worker error on reel {reel_id}: {str(e)}")
         if is_retryable_worker_error(e) and _schedule_worker_retry(row, str(e)):
             return
-        db.mark_failed_with_status(reel_id, str(e), "failed")
+        db.mark_failed(reel_id, str(e))
 
 
 def is_retryable_worker_error(error: Exception) -> bool:
@@ -953,7 +945,6 @@ def extract_text(payload: dict):
 
 ACTIVE_REEL_STATUSES = frozenset({"pending", "processing"})
 SUCCESS_REEL_STATUSES = frozenset({"done"})
-FAILURE_REEL_STATUSES = frozenset({"failed", "cookies_expired", "unsupported_format"})
 
 BATCH_JOB = {
     "status": "idle",   # idle | running | done | error
@@ -969,26 +960,19 @@ BATCH_JOB = {
 }
 
 
-async def update_batch_job_status():
+def update_batch_job_status():
     """Query Supabase to aggregate current progress for the tracked URLs."""
-    if not BATCH_JOB["urls"]:
+    urls = BATCH_JOB["urls"]
+    if not urls:
         BATCH_JOB["status"] = "idle"
         return
-        
-    client = db.get_client()
-    urls = BATCH_JOB["urls"]
-    
-    # Fetch all statuses in chunks of 100 to avoid query limit bounds
-    db_rows = []
-    for chunk in _chunked(urls, 100):
-        try:
-            res = client.table(db.TABLE).select("url", "status", "error").in_("url", chunk).execute()
-            db_rows.extend(res.data or [])
-        except Exception as e:
-            logger.error(f"Error fetching batch status chunk: {e}")
-            
-    status_map = {row["url"]: row for row in db_rows}
-    
+
+    try:
+        status_map = {row["url"]: row for row in db.statuses_for_urls(urls)}
+    except Exception as e:
+        logger.error(f"Error fetching batch status: {e}")
+        return
+
     ok = 0
     failed = 0
     processing = 0
@@ -1004,7 +988,7 @@ async def update_batch_job_status():
             status = row.get("status") or "done"
             if status in SUCCESS_REEL_STATUSES:
                 ok += 1
-            elif status in FAILURE_REEL_STATUSES:
+            elif status in db.FAILURE_STATUSES:
                 failed += 1
                 errors.append({"url": url, "detail": row.get("error") or "Unknown error"})
             elif status in ACTIVE_REEL_STATUSES:
@@ -1030,57 +1014,27 @@ async def update_batch_job_status():
 
 
 @app.post("/extract/batch", dependencies=[Depends(verify_api_key)])
-async def extract_batch(file: UploadFile = File(...)):
+def extract_batch(file: UploadFile = File(...)):
     """Accept an uploaded saved_posts.json and enqueue reels in Supabase."""
     if BATCH_JOB["status"] == "running":
-        await update_batch_job_status()
+        update_batch_job_status()
         if BATCH_JOB["status"] == "running":
             raise HTTPException(status_code=409, detail="A batch import is already running.")
 
     try:
-        raw = await file.read()
-        data = json.loads(raw)
+        data = json.loads(file.file.read())
     except Exception:
         raise HTTPException(status_code=400, detail="Could not parse uploaded JSON.")
-        
+
     reels = parse_saved_posts(data)
     if not reels:
         raise HTTPException(status_code=400, detail="No reel URLs found in the uploaded file.")
-        
-    # Query Supabase to find which URLs already exist
-    client = db.get_client()
+
     urls = [r["url"] for r in reels]
-    
-    # Check existing in chunks of 100
-    existing_urls = set()
-    for chunk in _chunked(urls, 100):
-        res = client.table(db.TABLE).select("url").in_("url", chunk).execute()
-        for row in (res.data or []):
-            existing_urls.add(row["url"])
-            
+    existing_urls = {row["url"] for row in db.statuses_for_urls(urls)}
     new_reels = [r for r in reels if r["url"] not in existing_urls]
-    
-    enqueued_count = 0
-    if new_reels:
-        rows_to_insert = [
-            {
-                "id": str(uuid.uuid4()),
-                "url": r["url"],
-                "title": r["title"] or f"Reel ({r['url'].split('/reel/')[-1].replace('/', '')})",
-                "raw_transcript": "",
-                "post_caption": r["caption"],
-                "extracted_json": {},
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "status": "pending",
-                "source": "batch",
-            }
-            for r in new_reels
-        ]
-        
-        # Insert in chunks of 50
-        for chunk in _chunked(rows_to_insert, 50):
-            client.table(db.TABLE).insert(chunk).execute()
-        enqueued_count = len(rows_to_insert)
+    db.insert_pending_reels(new_reels, source="batch")
+    enqueued_count = len(new_reels)
 
     # Initialize batch tracking state
     BATCH_JOB.update({
@@ -1105,9 +1059,9 @@ async def extract_batch(file: UploadFile = File(...)):
 
 
 @app.get("/extract/batch/status")
-async def extract_batch_status():
+def extract_batch_status():
     """Poll endpoint to check progress."""
     if BATCH_JOB["status"] == "running":
-        await update_batch_job_status()
+        update_batch_job_status()
     return BATCH_JOB
 
