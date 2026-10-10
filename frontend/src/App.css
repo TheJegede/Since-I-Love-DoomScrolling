@@ -184,10 +184,8 @@
 
 .search-bar,
 .input-group,
-.paste-zone textarea,
 .url-input,
-.workspace-rail select,
-.controls-bar select {
+.workspace-rail select {
   background: var(--bg-input);
   border: 1px solid var(--glass-border);
   color: var(--text-primary);
@@ -215,7 +213,6 @@
 
 .search-bar input::placeholder,
 .url-input::placeholder,
-.paste-zone textarea::placeholder,
 textarea::placeholder {
   color: var(--text-muted);
   opacity: 1;
@@ -226,8 +223,7 @@ textarea::placeholder {
   flex-shrink: 0;
 }
 
-.workspace-rail select,
-.controls-bar select {
+.workspace-rail select {
   width: 100%;
   padding: 0.65rem 2rem 0.65rem 0.75rem;
   font: inherit;
