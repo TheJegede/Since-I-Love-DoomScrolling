@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from './supabaseClient';
 import { embedQuery, loadEmbedder } from './queryEmbedder';
 
-// Tuned by hand against real reels; see docs/superpowers/specs/2026-10-10-semantic-search-design.md.
-export const MATCH_THRESHOLD = 0.3;
+// Tuned by hand against real reels (2026-10-10): topics absent from the library
+// peaked at 0.39 similarity, real matches mostly sat at 0.40 and above.
+export const MATCH_THRESHOLD = 0.4;
 export const MATCH_COUNT = 100;
 const MIN_QUERY_LENGTH = 2;
 const DEBOUNCE_MS = 300;
