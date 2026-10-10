@@ -19,7 +19,7 @@ Educational and tool-focused short-form videos are full of high-density, actiona
 | **Bulk Import** | Upload Instagram's `saved_posts.json` export to batch-process hundreds of saved reels |
 | **File Upload** | Drag-and-drop an audio file if the scraper can't reach the reel |
 | **Text Paste** | Copy-paste a caption or transcript directly for LLM extraction |
-| **AI Extraction** | Groq Whisper transcribes audio; Llama 3.1 8B extracts structured JSON insights |
+| **AI Extraction** | Groq Whisper transcribes audio; a Groq-hosted LLM (with automatic model fallback) extracts structured JSON insights |
 | **Clustering** | Emergent topic clustering groups your reels into themes automatically |
 | **Live Dashboard** | Filter by cluster, tool, date, or keyword — all in-memory, instant |
 | **Delete** | Remove any reel from the dashboard and database in one click |
@@ -36,7 +36,7 @@ iPhone Shortcut ──► Supabase REST (pending row)
                     │  (drains queue items)  │      for Instagram scraping
                     └───────────┬────────────┘
                                 │
-              yt-dlp → ffmpeg → Groq Whisper → Groq Llama → Supabase (done)
+              yt-dlp → ffmpeg → Groq Whisper → Groq LLM → Supabase (done)
                                 │
               ┌─────────────────▼─────────────────┐
               │  React/Vite Dashboard (Vercel)     │
@@ -54,7 +54,7 @@ iPhone Shortcut ──► Supabase REST (pending row)
 | **Frontend** | React 19 · Vite · supabase-js | Vercel (free hobby) |
 | **Database** | Supabase Postgres (`saved_reels` table) | Supabase (free tier) |
 | **Transcription** | Groq Whisper (`whisper-large-v3-turbo`) | Groq (free tier) |
-| **LLM** | Groq Llama (`llama-3.1-8b-instant`) | Groq (free tier) |
+| **LLM** | Groq `openai/gpt-oss-120b` (configurable, with fallbacks) | Groq (free tier) |
 | **Scraping** | yt-dlp + ffmpeg + Instagram cookies | Local only |
 
 > ⚠️ Instagram blocks datacenter IPs. Reel downloads **must** run via the local worker on a residential machine — the HF backend handles all other API routes.
@@ -227,7 +227,10 @@ Base URL (local): `http://localhost:8000` · (production): `https://whoisluwah-t
 | `POST` | `/extract/text` | Skip download + transcription; run LLM on pasted text |
 | `POST` | `/extract/batch` | Upload `saved_posts.json`; inserts rows as `pending` for worker |
 | `GET` | `/extract/batch/status` | Poll active batch job progress |
-| `POST` | `/clusters/recompute` | Re-run LLM clustering over all reels (chunked, ~30s) |
+| `POST` | `/reels/{id}/retry` | Requeue a failed reel for the worker |
+| `GET` | `/reels/{id}/details` | Transcript + caption for one reel |
+| `POST` | `/clusters/recompute` | Regroup all reels into topic clusters in the background (local embeddings + one LLM call to name them) |
+| `GET` | `/clusters/recompute/status` | Poll the recompute job |
 
 ---
 
@@ -251,7 +254,7 @@ python backend/verify_pipeline.py
 # Bulk import from Instagram export file (resumable)
 python backend/batch_import.py path/to/saved_posts.json
 
-# Inspect / clean the Supabase queue (pending/failed rows)
+# Inspect the Supabase queue (pending/failed rows)
 python backend/check_queue.py
 
 # --- Frontend ---
@@ -318,13 +321,15 @@ Transcriber/
 │   ├── saved_parser.py      # Instagram saved_posts.json parser
 │   ├── batch_import.py      # CLI bulk importer
 │   ├── check_queue.py       # Queue diagnostic tool
-│   ├── verify_pipeline.py   # Integration tests (20 tests, mocked)
+│   ├── verify_pipeline.py   # Integration tests (mocked)
 │   ├── run_local.ps1        # Dev startup script (Windows)
 │   ├── Dockerfile           # HF Spaces container
 │   └── requirements.txt
 ├── frontend/
 │   ├── src/
-│   │   ├── App.jsx          # Single-component SPA
+│   │   ├── App.jsx          # App shell: data loading, filters, layout
+│   │   ├── components/      # IngestionPanel, ReelModal, ReelCard, InsightsTable, Skeletons
+│   │   ├── api.js           # Backend base URL + authenticated fetch
 │   │   ├── supabaseClient.js
 │   │   ├── App.css
 │   │   └── index.css
@@ -342,7 +347,7 @@ Transcriber/
 
 This is a personal knowledge management tool but PRs and issues are welcome. Before contributing:
 
-1. Run `python backend/verify_pipeline.py` — all 20 tests must pass.
+1. Run `python backend/verify_pipeline.py` — all tests must pass.
 2. Run `cd frontend && npm run lint && npm run build` — must be clean.
 3. Keep `backend/main.py`'s `guard_silent_hook` behavior intact (prevents hallucinated summaries on music-only reels).
 
