@@ -249,10 +249,7 @@ python backend/run_worker.py
 .\backend\.venv\Scripts\python.exe -m pip install --upgrade yt-dlp
 
 # Run all pipeline tests (mocked — no real API keys or DB needed)
-python backend/verify_pipeline.py
-
-# Bulk import from Instagram export file (resumable)
-python backend/batch_import.py path/to/saved_posts.json
+python -m pytest backend    # needs: pip install -r backend/requirements-dev.txt
 
 # Inspect the Supabase queue (pending/failed rows)
 python backend/check_queue.py
@@ -319,9 +316,8 @@ Transcriber/
 │   ├── db.py                # Supabase data layer (all DB ops)
 │   ├── run_worker.py        # Standalone queue worker
 │   ├── saved_parser.py      # Instagram saved_posts.json parser
-│   ├── batch_import.py      # CLI bulk importer
 │   ├── check_queue.py       # Queue diagnostic tool
-│   ├── verify_pipeline.py   # Integration tests (mocked)
+│   ├── test_pipeline.py     # Pytest suite (mocked)
 │   ├── run_local.ps1        # Dev startup script (Windows)
 │   ├── Dockerfile           # HF Spaces container
 │   └── requirements.txt
@@ -347,7 +343,7 @@ Transcriber/
 
 This is a personal knowledge management tool but PRs and issues are welcome. Before contributing:
 
-1. Run `python backend/verify_pipeline.py` — all tests must pass.
+1. Run `python -m pytest backend` — all tests must pass.
 2. Run `cd frontend && npm run lint && npm run build` — must be clean.
 3. Keep `backend/main.py`'s `guard_silent_hook` behavior intact (prevents hallucinated summaries on music-only reels).
 

@@ -34,7 +34,7 @@ Core flow: `download → transcribe → extract → persist` (`_run_pipeline`).
 - `GET /extract/batch/status` — aggregates progress by querying Supabase for the tracked URLs' statuses.
 - `GET /reels` — lists saved rows (fallback for a frontend without Supabase config).
 - `GET /reels/{id}/details` — transcript + caption for one reel. `POST /reels/{id}/retry` — requeue a failed reel. `DELETE /reels/{id}` — removes a row.
-- `POST /clusters/recompute` — regroups all extracted reels into 8–12 topic clusters in a background task (`cluster_topics_semantically`): local embeddings (fastembed) → agglomerative clustering (scikit-learn) → one LLM call to name the clusters. Queued/failed reels are reset to Unclustered. Poll `GET /clusters/recompute/status`. Run manually from the dashboard; new reels have `cluster: null` until then.
+- `POST /clusters/recompute` — regroups all extracted reels into 8–12 topic clusters in a background task (`cluster_topics_semantically`): local embeddings (fastembed) → k-means (scikit-learn) → one LLM call to name the clusters. Queued/failed reels are reset to Unclustered. Poll `GET /clusters/recompute/status`. Run manually from the dashboard; new reels have `cluster: null` until then.
 - `GET /health` — frontend polls it to detect a cold/sleeping HF backend.
 
 Endpoints are plain `def` on purpose: the pipeline and Supabase calls block, so FastAPI must run them in its threadpool. Write endpoints require an `X-API-Key` header when `API_AUTH_TOKEN` is set.
@@ -44,6 +44,7 @@ Key behaviors to preserve when editing:
 - **Structured output:** `extract_structured_json` forces `response_format={"type": "json_object"}` and validates with the `ReelExtraction` Pydantic model. The model is the contract — changing fields means updating the system prompt, the Pydantic model, the Supabase column shape, and the frontend rendering together. (`action_items` is `List[str]` — a validator coerces dict-shaped LLM output.)
 - **Models:** Whisper `whisper-large-v3-turbo`; LLM `GROQ_LLM_MODEL` (default `openai/gpt-oss-120b`) with `GROQ_LLM_FALLBACK_MODELS` tried in order. `_chat_json` owns that failover loop for both extraction and cluster naming. See `ERRORS.md` for why the models changed.
 - **Cookies:** Instagram blocks anonymous scraping. `get_cookie_file` searches common paths for `cookies.txt`; mount an exported browser session to bypass 403/rate-limit errors. Cookies expire → re-export when IG 403s. Absence is non-fatal.
+- **Transcription failures:** the worker re-raises a failed transcription so the reel is retried with backoff; only its final attempt (and the synchronous `/extract/url` path) falls back to a caption-only extraction.
 - **Temp files** are always cleaned up in a `finally` block.
 
 ### Data layer (`backend/db.py`)
@@ -74,11 +75,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 # Standalone local worker (drains the Supabase queue; no FastAPI server needed)
 python backend/run_worker.py
 
-# Pipeline tests (mocks Groq + DB, FastAPI TestClient, ENABLE_WORKER=0 — no real keys/server)
-python backend/verify_pipeline.py
-
-# Bulk-import a saved_posts.json via the running backend (resumable, see file docstring)
-python backend/batch_import.py path/to/saved_posts.json
+# Pipeline tests: pytest, mocks Groq + DB, no real keys/server (pip install -r backend/requirements-dev.txt)
+python -m pytest backend
 
 # Inspect the Supabase queue (pending/processing/failed rows)
 python backend/check_queue.py

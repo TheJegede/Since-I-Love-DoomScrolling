@@ -2,6 +2,24 @@
 
 Failure log. Record bugs hit, root cause, fix. Newest first.
 
+### 2026-10-10 — Recompute put 96% of reels into two clusters
+**Symptom:** After a recompute, 740 reels split 404 / 306 plus ten clusters of 1–8 reels.
+**Root cause:** `_semantic_cluster_labels` used average-linkage agglomerative clustering, which chains most points into a couple of giant clusters and leaves outliers as singletons.
+**Fix (`backend/main.py`):** k-means on normalized embeddings (fixed seed). Same library now gives 12 clusters of 33–106.
+**Verified:** real recompute against Supabase; `test_cluster_labels_are_balanced`.
+
+### 2026-10-10 — /extract/url 500 when the URL is already queued or failed
+**Symptom:** Submitting a URL whose row existed but was not `done` returned HTTP 500 (`ResponseValidationError`).
+**Root cause:** `ExtractionResponse` required a full `ReelExtraction` and a `title`; pending/failed rows have `{}` and Shortcut rows have a NULL title.
+**Fix (`backend/main.py`):** the response model allows an empty `extracted_json` and NULL title, and returns `status`/`error` so the dashboard shows the queue or failure banner.
+**Verified:** `test_extract_url_returns_unfinished_row`.
+
+### 2026-10-10 — Dashboard showed only the newest 500 reels
+**Symptom:** Library of 754 reels; the oldest 254 never appeared, so search and cluster counts were wrong.
+**Root cause:** `App.jsx` fetched with `.limit(500)`; Supabase also caps any request at 1000 rows.
+**Fix:** `fetchAllReelRows` (frontend) and `db._select_newest_first` (backend) page through the table.
+**Verified:** paged query returns 754 unique rows against the live table.
+
 ### 2026-08-24 — /extract 400 json_validate_failed: qwen/qwen3.6-27b reasoning token limit
 **Symptom:** Reel structured extraction failed on verbose inputs with `Error code: 400 - Failed to validate JSON / Failed to generate JSON: max completion tokens reached before generating a valid document`.
 **Root cause:** `qwen/qwen3.6-27b` on Groq exhausts completion tokens on internal reasoning tokens when forced into JSON mode on longer prompts.
