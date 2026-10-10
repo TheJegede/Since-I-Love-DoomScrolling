@@ -7,7 +7,6 @@ RLS) and must only ever run on a trusted machine.
 import json
 import os
 import uuid
-from collections import Counter
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -202,9 +201,3 @@ def schedule_retry(reel_id: str, error: str, next_attempt_at: datetime) -> None:
         "processing_started_at": None,
         "next_attempt_at": next_attempt_at.astimezone(timezone.utc).isoformat(),
     }).eq("id", reel_id).execute()
-
-def cluster_counts() -> list:
-    res = get_client().table(TABLE).select("cluster").execute()
-    counts = Counter((r.get("cluster") or "Unclustered") for r in (res.data or []))
-    return [{"name": name, "count": n}
-            for name, n in sorted(counts.items(), key=lambda kv: -kv[1])]

@@ -220,15 +220,13 @@ Base URL (local): `http://localhost:8000` · (production): `https://whoisluwah-t
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` | Health check — used by the frontend to detect cold starts |
-| `GET` | `/reels` | List all saved reels (optional `?search=` param) |
+| `GET` | `/reels` | List all saved reels |
 | `DELETE` | `/reels/{id}` | Delete a reel |
 | `POST` | `/extract/url` | Full pipeline: download → transcribe → extract → save |
 | `POST` | `/extract/file` | Skip download; transcribe an uploaded audio file |
 | `POST` | `/extract/text` | Skip download + transcription; run LLM on pasted text |
 | `POST` | `/extract/batch` | Upload `saved_posts.json`; inserts rows as `pending` for worker |
 | `GET` | `/extract/batch/status` | Poll active batch job progress |
-| `POST` | `/reels/status` | Check statuses for a list of reel IDs/URLs |
-| `GET` | `/clusters` | List cluster names + counts |
 | `POST` | `/clusters/recompute` | Re-run LLM clustering over all reels (chunked, ~30s) |
 
 ---

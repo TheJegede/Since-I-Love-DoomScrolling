@@ -177,15 +177,6 @@ class ExtractionResponse(BaseModel):
 
 # Semantic clustering uses local embeddings for assignment and one small LLM call only for names.
 
-
-# Backward-compatible response schema retained for existing pipeline tests and callers.
-class ClusterAssignment(BaseModel):
-    id: str
-    cluster: str
-
-
-class ClusterAssignments(BaseModel):
-    assignments: List[ClusterAssignment]
 EMBEDDING_MODEL_NAME = os.getenv(
     "EMBEDDING_MODEL_NAME",
     "sentence-transformers/all-MiniLM-L6-v2",
@@ -379,74 +370,12 @@ def cluster_topics_semantically(items: List[dict]) -> List[dict]:
     ]
 
 
-# Compatibility hooks retained for older tests and external imports. The production
-# recompute path uses cluster_topics_semantically; these hooks are only consulted
-# when a caller explicitly replaces them.
-CLUSTER_CHUNK_SIZE = 50
-CLUSTER_CHUNK_DELAY = 30
-
-
 def _chunked(seq: list, size: int):
     """Yield successive size-length slices of a sequence."""
     for i in range(0, len(seq), size):
         yield seq[i:i + size]
 
-def _cluster_one_chunk(chunk: List[dict], existing_clusters: List[str]) -> List[dict]:
-    raise RuntimeError("The legacy chunking hook is disabled; use semantic clustering.")
 
-
-def _merge_cluster_names(names: List[str]) -> dict:
-    return {}
-
-
-_LEGACY_DEFAULT_CLUSTER_ONE_CHUNK = _cluster_one_chunk
-_LEGACY_DEFAULT_MERGE_CLUSTER_NAMES = _merge_cluster_names
-
-
-def _legacy_cluster_topics(items: List[dict]) -> List[dict]:
-    idx_to_id = {}
-    indexed = []
-    for i, item in enumerate(items):
-        idx = str(i)
-        idx_to_id[idx] = item["id"]
-        indexed.append({"id": idx, "topic": item.get("topic", "")})
-
-    raw = []
-    known_clusters = []
-    for start in range(0, len(indexed), CLUSTER_CHUNK_SIZE):
-        chunk = indexed[start:start + CLUSTER_CHUNK_SIZE]
-        part = _cluster_one_chunk(chunk, known_clusters)
-        for assignment in part:
-            raw.append(assignment)
-            name = assignment.get("cluster")
-            if name and name not in known_clusters:
-                known_clusters.append(name)
-        if start + CLUSTER_CHUNK_SIZE < len(indexed) and CLUSTER_CHUNK_DELAY:
-            time.sleep(CLUSTER_CHUNK_DELAY)
-
-    seen = {}
-    for assignment in raw:
-        assignment_id = assignment.get("id")
-        cluster = assignment.get("cluster")
-        if assignment_id in idx_to_id and cluster and assignment_id not in seen:
-            seen[assignment_id] = cluster
-
-    distinct = list(dict.fromkeys(seen.values()))
-    merge_map = _merge_cluster_names(distinct) if len(distinct) > 1 else {}
-    return [
-        {"id": idx_to_id[assignment_id], "cluster": merge_map.get(cluster, cluster)}
-        for assignment_id, cluster in seen.items()
-    ]
-
-
-def cluster_topics_with_llm(items: List[dict]) -> List[dict]:
-    """Compatibility entry point; normal calls use semantic clustering."""
-    if (
-        _cluster_one_chunk is not _LEGACY_DEFAULT_CLUSTER_ONE_CHUNK
-        or _merge_cluster_names is not _LEGACY_DEFAULT_MERGE_CLUSTER_NAMES
-    ):
-        return _legacy_cluster_topics(items)
-    return cluster_topics_semantically(items)
 # Helper functions
 def is_valid_instagram_reel(url: str) -> bool:
     if not url:
@@ -759,7 +688,7 @@ def run_cluster_recompute_task():
                     ej = {}
             items.append({"id": r["id"], "topic": (ej or {}).get("core_topic", ""), "takeaway": (ej or {}).get("key_takeaway", "")})
 
-        assignments = cluster_topics_with_llm(items)
+        assignments = cluster_topics_semantically(items)
         valid_ids = {r["id"] for r in rows}
         applied = 0
         for a in assignments:
@@ -796,15 +725,6 @@ def recompute_clusters(background_tasks: BackgroundTasks):
 def get_recompute_status():
     """Poll endpoint to check recomputation status."""
     return CLUSTER_JOB
-
-@app.get("/clusters")
-def list_clusters():
-    """Return emergent clusters with reel counts."""
-    try:
-        return db.cluster_counts()
-    except Exception as e:
-        logger.error(f"Failed to list clusters: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to list clusters: {str(e)}")
 
 def _run_pipeline(url: str) -> tuple[str, str, str, ReelExtraction]:
     """Download → transcribe → silent-hook guard → LLM extract for one reel.
@@ -1191,18 +1111,3 @@ async def extract_batch_status():
         await update_batch_job_status()
     return BATCH_JOB
 
-
-@app.post("/reels/status")
-async def get_reels_status(payload: dict):
-    """Stateless status check for a list of URLs."""
-    urls = payload.get("urls", [])
-    if not urls:
-        return []
-        
-    client = db.get_client()
-    db_rows = []
-    for chunk in _chunked(urls, 100):
-        res = client.table(db.TABLE).select("url", "status", "error").in_("url", chunk).execute()
-        db_rows.extend(res.data or [])
-        
-    return db_rows

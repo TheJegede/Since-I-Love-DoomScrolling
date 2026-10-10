@@ -30,15 +30,6 @@ def test_health():
     assert response.json()["status"] == "ok"
     print("[OK] Health check passed!")
 
-def test_cluster_assignments_model():
-    print("Testing ClusterAssignments validation...")
-    from main import ClusterAssignments
-    m = ClusterAssignments(assignments=[{"id": "a", "cluster": "AI Tools"},
-                                         {"id": "b", "cluster": "Fitness"}])
-    assert m.assignments[0].cluster == "AI Tools"
-    assert m.assignments[1].id == "b"
-    print("[OK] ClusterAssignments model passed!")
-
 def test_extract_text_mock():
     print("Testing POST /extract/text with mock data...")
     # Monkeypatch the extract_structured_json function in main to prevent external calls
@@ -93,13 +84,10 @@ def test_recompute_clusters_mock():
     applied = []
     orig_for = main.db.reels_for_clustering
     orig_set = main.db.set_cluster
-    orig_counts = main.db.cluster_counts
-    orig_llm = main.cluster_topics_with_llm
+    orig_llm = main.cluster_topics_semantically
     main.db.reels_for_clustering = lambda: fake_rows
     main.db.set_cluster = lambda rid, cluster: applied.append((rid, cluster))
-    main.db.cluster_counts = lambda: [{"name": "Productivity", "count": 1},
-                                      {"name": "Fitness", "count": 1}]
-    main.cluster_topics_with_llm = lambda items: [
+    main.cluster_topics_semantically = lambda items: [
         {"id": "a", "cluster": "Productivity"}, {"id": "b", "cluster": "Fitness"}]
     try:
         r = client.post("/clusters/recompute")
@@ -116,87 +104,7 @@ def test_recompute_clusters_mock():
     finally:
         main.db.reels_for_clustering = orig_for
         main.db.set_cluster = orig_set
-        main.db.cluster_counts = orig_counts
-        main.cluster_topics_with_llm = orig_llm
-
-def test_cluster_chunking():
-    print("Testing cluster_topics_with_llm chunks large inputs...")
-    import main
-    items = [{"id": f"id{i}", "topic": f"topic {i % 3}"} for i in range(130)]
-    calls = []
-    orig_chunk = main._cluster_one_chunk
-    orig_merge = main._merge_cluster_names
-    orig_delay = main.CLUSTER_CHUNK_DELAY
-
-    def fake_chunk(chunk, existing):
-        calls.append((len(chunk), list(existing)))
-        return [{"id": c["id"], "cluster": "C" + c["topic"][-1]} for c in chunk]
-
-    main._cluster_one_chunk = fake_chunk
-    main._merge_cluster_names = lambda names: {}  # identity (no consolidation)
-    main.CLUSTER_CHUNK_DELAY = 0
-    try:
-        import math
-        out = main.cluster_topics_with_llm(items)
-        # every reel assigned, real ids preserved (index mapping round-trips)
-        assert len(out) == 130, len(out)
-        assert {o["id"] for o in out} == {f"id{i}" for i in range(130)}
-        # chunk count derives from the configured size (not hardcoded)
-        size = main.CLUSTER_CHUNK_SIZE
-        expected_chunks = math.ceil(130 / size)
-        assert len(calls) == expected_chunks, calls
-        assert calls[0][0] == min(size, 130), calls
-        assert calls[-1][0] == 130 - size * (expected_chunks - 1), calls
-        # later chunks receive accumulated cluster names
-        assert calls[1][1], "existing cluster names not propagated to later chunks"
-        print("[OK] cluster chunking passed!")
-    finally:
-        main._cluster_one_chunk = orig_chunk
-        main._merge_cluster_names = orig_merge
-        main.CLUSTER_CHUNK_DELAY = orig_delay
-
-
-def test_cluster_merge_pass():
-    print("Testing cluster_topics_with_llm consolidates fragmented names + dedups...")
-    import main
-    items = [{"id": f"id{i}", "topic": "t"} for i in range(4)]
-    orig_chunk = main._cluster_one_chunk
-    orig_merge = main._merge_cluster_names
-    orig_delay = main.CLUSTER_CHUNK_DELAY
-    main.CLUSTER_CHUNK_DELAY = 0
-
-    # Chunk returns fragmented AI-ish names + a duplicate id (id0 assigned twice)
-    def fake_chunk(chunk, existing):
-        out = [{"id": c["id"],
-                "cluster": "AI Tools" if int(c["id"]) % 2 == 0 else "AI Email Tools"}
-               for c in chunk]
-        out.append({"id": chunk[0]["id"], "cluster": "Dup"})  # duplicate id
-        return out
-
-    captured = {}
-
-    def fake_merge(names):
-        captured["names"] = sorted(names)
-        return {n: ("AI" if n.startswith("AI") else n) for n in names}
-
-    main._cluster_one_chunk = fake_chunk
-    main._merge_cluster_names = fake_merge
-    try:
-        out = main.cluster_topics_with_llm(items)
-        ids = [o["id"] for o in out]
-        # each id appears exactly once (duplicate collapsed, keep-first)
-        assert len(ids) == len(set(ids)) == 4, out
-        # fragmented AI names consolidated by the merge map
-        clusters = {o["id"]: o["cluster"] for o in out}
-        assert clusters["id0"] == "AI" and clusters["id2"] == "AI", out
-        # merge pass received the distinct fragmented names
-        assert "AI Tools" in captured["names"] and "AI Email Tools" in captured["names"]
-        print("[OK] cluster merge pass passed!")
-    finally:
-        main._cluster_one_chunk = orig_chunk
-        main._merge_cluster_names = orig_merge
-        main.CLUSTER_CHUNK_DELAY = orig_delay
-
+        main.cluster_topics_semantically = orig_llm
 
 def test_row_to_record_handles_bad_json():
     print("Testing row_to_record tolerates malformed extracted_json...")
@@ -212,7 +120,7 @@ def test_db_module_surface():
     print("Testing db.py exposes the expected data-layer functions...")
     import db
     for fn in ("get_reel_by_url", "insert_reel", "list_reels",
-               "reels_for_clustering", "set_cluster", "cluster_counts",
+               "reels_for_clustering", "set_cluster",
                "row_to_record"):
         assert hasattr(db, fn), f"db.{fn} missing"
     print("[OK] db module surface passed!")
@@ -357,20 +265,6 @@ def test_get_reel_details():
         print("[OK] get reel details passed!")
     finally:
         main.db.get_reel_details = orig
-
-
-def test_list_clusters():
-    print("Testing GET /clusters (db mocked)...")
-    import main
-    orig = main.db.cluster_counts
-    main.db.cluster_counts = lambda: [{"name": "AI Tools", "count": 3}]
-    try:
-        r = client.get("/clusters")
-        assert r.status_code == 200, r.text
-        assert r.json()[0]["name"] == "AI Tools"
-        print("[OK] list clusters passed!")
-    finally:
-        main.db.cluster_counts = orig
 
 
 def test_reels_include_cluster():
@@ -542,32 +436,6 @@ def test_extract_batch_supabase():
         main.db.get_client = orig_client
         main.BATCH_JOB["status"] = "idle"
         main.BATCH_JOB["urls"] = []
-
-
-def test_reels_status_endpoint():
-    print("Testing POST /reels/status...")
-    import main
-    class FakeTable:
-        def select(self, *args):
-            return self
-        def in_(self, col, vals):
-            return self
-        def execute(self):
-            class Res:
-                data = [{"url": "https://www.instagram.com/reel/AAA/", "status": "done"}]
-            return Res()
-            
-    orig_client = main.db.get_client
-    main.db.get_client = lambda: type('FakeClient', (), {'table': lambda self, name: FakeTable()})()
-    try:
-        r = client.post("/reels/status", json={"urls": ["https://www.instagram.com/reel/AAA/"]})
-        assert r.status_code == 200, r.text
-        assert len(r.json()) == 1
-        assert r.json()[0]["url"] == "https://www.instagram.com/reel/AAA/"
-        assert r.json()[0]["status"] == "done"
-        print("[OK] reels status endpoint passed!")
-    finally:
-        main.db.get_client = orig_client
 
 
 def test_url_validation_helper():
@@ -808,11 +676,8 @@ def test_db_queue_metadata_contract():
 if __name__ == "__main__":
     print("--- Starting Transcriber Pipeline Test ---")
     test_health()
-    test_cluster_assignments_model()
     test_extract_text_mock()
     test_recompute_clusters_mock()
-    test_cluster_chunking()
-    test_cluster_merge_pass()
     test_row_to_record_handles_bad_json()
     test_db_module_surface()
     test_db_queue_surface()
@@ -822,7 +687,6 @@ if __name__ == "__main__":
     test_extract_url_regression()
     test_delete_reel()
     test_get_reel_details()
-    test_list_clusters()
     test_reels_include_cluster()
     test_cors_no_credentials()
     test_chunked_helper()
@@ -830,7 +694,6 @@ if __name__ == "__main__":
     test_batch_status_initial()
     test_batch_guard_409()
     test_extract_batch_supabase()
-    test_reels_status_endpoint()
     test_url_validation_helper()
     test_extract_url_validation_error()
     test_worker_tick_invalid_url()
