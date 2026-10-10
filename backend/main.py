@@ -673,13 +673,10 @@ def health_check():
     return {"status": "ok", "message": "Extractor service is awake and running."}
 
 @app.get("/reels")
-def list_reels(
-    limit: int = Query(20, description="Max number of items to return"),
-    search: Optional[str] = Query(None, description="Search across title/transcript/caption"),
-):
+def list_reels(limit: int = Query(20, description="Max number of items to return")):
     """Retrieve saved reels from Supabase."""
     try:
-        return db.list_reels(limit=limit, search=search)
+        return db.list_reels(limit=limit)
     except Exception as e:
         logger.error(f"Error fetching reels: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch reels: {str(e)}")
@@ -859,7 +856,7 @@ def process_reel_url(url: str) -> dict:
 
 
 @app.post("/extract/url", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
-async def extract_url(payload: dict):
+def extract_url(payload: dict):
     """Accepts an Instagram Reel URL and runs the full extraction pipeline."""
     url = payload.get("url")
     if not url:
@@ -961,7 +958,7 @@ def _worker_loop(idle_interval: float = 20.0) -> None:
 
 
 @app.post("/extract/file", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
-async def extract_file(
+def extract_file(
     file: UploadFile = File(...),
     title: str = Form("Uploaded Audio File"),
     caption: Optional[str] = Form(None)
@@ -980,8 +977,7 @@ async def extract_file(
     temp_file_path = temp_file.name
     
     try:
-        content = await file.read()
-        temp_file.write(content)
+        temp_file.write(file.file.read())
         temp_file.close()
 
         # 1. Transcribe
@@ -1008,7 +1004,7 @@ async def extract_file(
             os.remove(temp_file_path)
 
 @app.post("/extract/text", response_model=ExtractionResponse, dependencies=[Depends(verify_api_key)])
-async def extract_text(payload: dict):
+def extract_text(payload: dict):
     """
     Accepts raw transcript text and/or captions directly to skip scraping/transcribing
     and extract JSON highlights. Saves to database.

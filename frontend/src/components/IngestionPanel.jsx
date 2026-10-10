@@ -11,7 +11,7 @@ export default function IngestionPanel(props) {
     fileInputRef, handleFileDrop, handleFileSelect, handleFileSubmit,
     textTitle, setTextTitle, textCaption, setTextCaption,
     textTranscript, setTextTranscript, handleTextSubmit,
-    batchFile, batchInputRef, handleBatchSelect, handleBatchSubmit,
+    batchFile, batchInputRef, handleBatchSelect, handleBatchDrop, handleBatchSubmit,
     isBatchRunning, batchJob,
     currentStep, steps,
   } = props;
@@ -145,7 +145,7 @@ export default function IngestionPanel(props) {
             className={`upload-zone ${isBatchDragging ? 'dragging' : ''}`}
             onDragOver={(e) => { e.preventDefault(); setIsBatchDragging(true); }}
             onDragLeave={(e) => { e.preventDefault(); setIsBatchDragging(false); }}
-            onDrop={(e) => { setIsBatchDragging(false); handleFileDrop(e); }} // reusable file drop trigger
+            onDrop={(e) => { setIsBatchDragging(false); handleBatchDrop(e); }}
             onClick={() => batchInputRef.current.click()}
           >
             <input 

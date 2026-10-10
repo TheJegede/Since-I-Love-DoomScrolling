@@ -20,7 +20,7 @@ const baseProps = {
   textTitle: '', setTextTitle: vi.fn(), textCaption: '', setTextCaption: vi.fn(),
   textTranscript: '', setTextTranscript: vi.fn(), handleTextSubmit: vi.fn(),
   batchFile: null, batchInputRef: createRef(), handleBatchSelect: vi.fn(),
-  handleBatchSubmit: vi.fn(), isBatchRunning: false, batchJob: null,
+  handleBatchDrop: vi.fn(), handleBatchSubmit: vi.fn(), isBatchRunning: false, batchJob: null,
   currentStep: 1, steps: [{ num: 1, label: 'Server Check' }],
 };
 

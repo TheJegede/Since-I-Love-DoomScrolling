@@ -377,7 +377,7 @@ def test_reels_include_cluster():
     print("Testing GET /reels includes cluster (db mocked)...")
     import main
     orig = main.db.list_reels
-    main.db.list_reels = lambda limit=20, search=None: [{
+    main.db.list_reels = lambda limit=20: [{
         "id": "x", "url": None, "title": "t", "raw_transcript": None,
         "post_caption": None, "extracted_json": {"core_topic": "c"},
         "created_at": "2026-06-06T00:00:00Z", "cluster": "Unclustered"}]

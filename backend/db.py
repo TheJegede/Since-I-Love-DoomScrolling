@@ -74,14 +74,18 @@ def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
     return row_to_record(row)
 
 
-def list_reels(limit: int = 20, search: Optional[str] = None) -> list:
-    q = get_client().table(TABLE).select("id, url, title, extracted_json, created_at, cluster, status, error").order("created_at", desc=True).limit(limit)
-    if search:
-        # UI filters in-memory; this server search is a coarse fallback over text cols.
-        like = f"%{search}%"
-        q = q.or_(f"title.ilike.{like},raw_transcript.ilike.{like},post_caption.ilike.{like}")
-    res = q.execute()
-    return [row_to_record(r) for r in (res.data or [])]
+def list_reels(limit: int = 20) -> list:
+    rows = []
+    while len(rows) < limit:
+        # PostgREST caps rows per request, so page until the limit is reached.
+        page = (get_client().table(TABLE)
+                .select("id, url, title, extracted_json, created_at, cluster, status, error")
+                .order("created_at", desc=True).order("id")
+                .range(len(rows), limit - 1).execute().data or [])
+        if not page:
+            break
+        rows.extend(page)
+    return [row_to_record(r) for r in rows]
 
 
 def get_reel_details(reel_id: str) -> Optional[dict]:

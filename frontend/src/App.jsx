@@ -51,6 +51,22 @@ const fetchWithAuth = async (url, options = {}) => {
   return res;
 };
 
+// Supabase caps rows per request, so page through until the whole library is loaded.
+async function fetchAllReelRows() {
+  const rows = [];
+  for (;;) {
+    const { data, error, count } = await supabase
+      .from('saved_reels')
+      .select('id, url, title, extracted_json, created_at, cluster, status, error', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .order('id')
+      .range(rows.length, rows.length + 999);
+    if (error) throw error;
+    rows.push(...data);
+    if (!data.length || rows.length >= count) return rows;
+  }
+}
+
 function computeClusters(reels) {
   const counts = {};
   for (const r of reels) {
@@ -151,19 +167,13 @@ export default function App() {
   const fetchReels = async () => {
     try {
       if (supabase) {
-        const { data, error } = await supabase
-          .from('saved_reels')
-          .select('id, url, title, extracted_json, created_at, cluster, status, error')
-          .order('created_at', { ascending: false })
-          .limit(500);
-        if (error) throw error;
-        const mapped = (data || []).map(rowToRecord);
+        const mapped = (await fetchAllReelRows()).map(rowToRecord);
         setReels(mapped);
         setClusters(computeClusters(mapped));
         return;
       }
       // Fallback: local FastAPI backend
-      const response = await fetch(`${API_BASE_URL}/reels?limit=500`);
+      const response = await fetch(`${API_BASE_URL}/reels?limit=10000`);
       if (response.ok) {
         const data = await response.json();
         setReels(data);
@@ -475,6 +485,16 @@ export default function App() {
     if (selected) setBatchFile(selected);
   };
 
+  const handleBatchDrop = (e) => {
+    e.preventDefault();
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile && droppedFile.name.toLowerCase().endsWith('.json')) {
+      setBatchFile(droppedFile);
+    } else {
+      setError("Please drop your saved_posts.json file.");
+    }
+  };
+
   const pollBatchStatus = async () => {
     try {
       const res = await fetchWithAuth(`${API_BASE_URL}/extract/batch/status`);
@@ -697,7 +717,7 @@ export default function App() {
             textTitle={textTitle} setTextTitle={setTextTitle} textCaption={textCaption} setTextCaption={setTextCaption}
             textTranscript={textTranscript} setTextTranscript={setTextTranscript} handleTextSubmit={handleTextSubmit}
             batchFile={batchFile} batchInputRef={batchInputRef} handleBatchSelect={handleBatchSelect}
-            handleBatchSubmit={handleBatchSubmit} isBatchRunning={isBatchRunning} batchJob={batchJob}
+            handleBatchDrop={handleBatchDrop} handleBatchSubmit={handleBatchSubmit} isBatchRunning={isBatchRunning} batchJob={batchJob}
             currentStep={currentStep} steps={steps}
           />
 
