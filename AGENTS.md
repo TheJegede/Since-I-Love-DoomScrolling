@@ -107,4 +107,4 @@ Deploy targets:
 - **Git remotes:** `origin` = GitHub, `hf` = HF Spaces (deploy backend via subtree split).
 
 ## Reference docs
-`prd.md`, `The trascriber implementation plan.md`, and `docs/superpowers/` (specs + plans, e.g. share-to-app hybrid, supabase-migration, bulk-import) describe intent and edge-case test scenarios (Resource Drop / Step-by-Step / Silent Hook). Useful for "why," but where they disagree with the code, **trust the code.**
+`prd.md` describes intent and edge-case test scenarios (Resource Drop / Step-by-Step / Silent Hook); `ERRORS.md` logs past failures and their fixes. Useful for "why," but where they disagree with the code, **trust the code.**

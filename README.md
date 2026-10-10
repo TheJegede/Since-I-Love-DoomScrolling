@@ -330,7 +330,6 @@ Transcriber/
 │   │   └── index.css
 │   ├── package.json
 │   └── vite.config.js
-├── docs/                    # Plans, specs, design notes
 ├── CLAUDE.md                # Architecture reference for AI agents
 ├── MEMORY.md                # Session log / decision log
 ├── prd.md                   # Product Requirements Document
