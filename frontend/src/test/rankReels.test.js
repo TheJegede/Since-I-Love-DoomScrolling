@@ -40,6 +40,20 @@ describe('rankReels', () => {
     expect(ids(rankReels(rich, 'title z', NONE))).toEqual(['z']);
   });
 
+  it('matches every word in any order, not the exact phrase', () => {
+    const rich = [
+      reel('both', 'Email automation', { tools_or_resources: ['Zapier'] }),
+      reel('one', 'Email etiquette'),
+    ];
+    expect(ids(rankReels(rich, 'zapier email', NONE))).toEqual(['both']);
+  });
+
+  it('counts transcript or caption hits from Supabase as word matches', () => {
+    const result = rankReels(reels, 'heckler', new Map([['c', 0.5]]), new Set(['a', 'ghost']));
+    expect(ids(result)).toEqual(['a', 'c']);
+    expect([...result.relatedIds]).toEqual(['c']);
+  });
+
   it('adds meaning-only matches after exact matches and flags them as related', () => {
     const result = rankReels(reels, 'comedy', new Map([['a', 0.95], ['b', 0.4]]));
     expect(ids(result)).toEqual(['b', 'd', 'a']);

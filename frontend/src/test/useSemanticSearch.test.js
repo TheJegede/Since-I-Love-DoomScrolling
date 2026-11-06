@@ -1,12 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 
-const { rpc, loadEmbedder, embedQuery } = vi.hoisted(() => ({
+const { rpc, textSearch, loadEmbedder, embedQuery } = vi.hoisted(() => ({
   rpc: vi.fn(),
+  textSearch: vi.fn(),
   loadEmbedder: vi.fn(),
   embedQuery: vi.fn(),
 }));
-vi.mock('../supabaseClient', () => ({ supabase: { rpc } }));
+vi.mock('../supabaseClient', () => ({
+  supabase: { rpc, from: () => ({ select: () => ({ textSearch }) }) },
+}));
 vi.mock('../queryEmbedder', () => ({ loadEmbedder, embedQuery }));
 
 import { useSemanticSearch, MATCH_THRESHOLD, MATCH_COUNT } from '../semanticSearch';
@@ -17,6 +20,8 @@ beforeEach(() => {
   loadEmbedder.mockReset().mockResolvedValue(undefined);
   embedQuery.mockReset().mockResolvedValue([0.1, 0.2]);
   rpc.mockReset().mockResolvedValue({ data: [{ id: 'a', similarity: 0.7 }], error: null });
+  textSearch.mockReset().mockImplementation(async (column) =>
+    ({ data: column === 'raw_transcript' ? [{ id: 't' }] : [{ id: 'c' }], error: null }));
 });
 
 describe('useSemanticSearch', () => {
@@ -60,6 +65,27 @@ describe('useSemanticSearch', () => {
     await waitFor(() => expect(result.current.scores.get('a')).toBe(0.7));
     expect(result.current.status).toBe('ready');
     expect(loadEmbedder).toHaveBeenCalledTimes(2);
+  });
+
+  it('finds transcript and caption matches without waiting for the model', async () => {
+    loadEmbedder.mockReturnValue(new Promise(() => {}));  // model never finishes downloading
+    const { result } = search('side hustle');
+    await waitFor(() => expect([...result.current.textIds].sort()).toEqual(['c', 't']));
+    expect(textSearch).toHaveBeenCalledWith('raw_transcript', 'side hustle', { type: 'websearch', config: 'english' });
+    expect(textSearch).toHaveBeenCalledWith('post_caption', 'side hustle', { type: 'websearch', config: 'english' });
+    expect(result.current.status).toBe('loading');
+    expect(result.current.transcriptsFailed).toBe(false);
+  });
+
+  it('says so when transcript search fails, and retry tries again', async () => {
+    textSearch.mockResolvedValueOnce({ data: null, error: { message: 'boom' } });
+    const { result } = search('comedy');
+    await waitFor(() => expect(result.current.transcriptsFailed).toBe(true));
+    expect(result.current.textIds.size).toBe(0);
+
+    act(() => result.current.retry());
+    await waitFor(() => expect(result.current.textIds.size).toBe(2));
+    expect(result.current.transcriptsFailed).toBe(false);
   });
 
   it('reports an error when Supabase rejects the lookup', async () => {

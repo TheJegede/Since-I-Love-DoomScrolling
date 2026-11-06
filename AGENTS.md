@@ -55,13 +55,13 @@ Every DB op lives here. Backend authenticates with the Supabase **service role**
 - `components/IngestionPanel.jsx` — owns the four ingestion modes (URL / file upload / text paste / **bulk** `saved_posts.json` with status polling + progress bar) and reports results up through `onIngested` / `onError` / `onBatchFinished`.
 - `components/ReelModal.jsx`, `ReelCard.jsx`, `InsightsTable.jsx`, `Skeletons.jsx` — presentation. Queued (`pending`/`processing`) and failed reels render as placeholders/banners.
 - `api.js` — `API_BASE_URL` (`VITE_API_URL`, else `http://localhost:8000` on localhost, else same-origin) and `fetchWithAuth` (adds `X-API-Key`, prompts for it on a 401).
-- `semanticSearch.js` — `rankReels` (exact-word matches first, then meaning matches) and `useSemanticSearch` (embeds the query in the browser via `queryEmbedder.js`, then calls the Supabase `match_reels` function). Without Supabase config, search is exact-word only.
+- `semanticSearch.js` — `rankReels` (word matches first, then meaning matches; every query word must appear, in any order) and `useSemanticSearch`, which asks Supabase for two things: meaning matches (embeds the query in the browser via `queryEmbedder.js`, then calls `match_reels`) and transcript/caption word matches (Postgres full-text search, `textSearch(..., { type: 'websearch', config: 'english' })`, no index yet).
 
 Two data channels:
 - **Reads** — if the `supabase` client is configured (`VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`), `fetchAllReelRows` pages through the whole table via supabase-js; without that config the dashboard shows an error. While reels are queued it re-fetches only those rows every 5s.
 - **Writes** — ingestion, `/clusters/recompute`, retry and delete go through `API_BASE_URL`.
 
-Cluster/tool/date filters and exact-word search run **in-memory**; meaning matches come from Supabase (`match_reels`) and are merged in by `rankReels`. A status line under the search bar says when smart search is still loading or unavailable. Checks `/health` on load for backend warm-up and re-fetches every 5s while any reel is queued. Styles live in `index.css` (tokens + base) and `App.css` (layout + components); avoid inline `style` except for values computed at runtime.
+Cluster/tool/date filters and word search over title/topic/takeaway/tools/actions run **in-memory**; transcripts and captions are never loaded in bulk, so their word matches and all meaning matches come from Supabase and are merged in by `rankReels`. Status lines under the search bar say when smart search is loading or unavailable, or transcript search failed. Checks `/health` on load for backend warm-up and re-fetches every 5s while any reel is queued. Styles live in `index.css` (tokens + base) and `App.css` (layout + components); avoid inline `style` except for values computed at runtime.
 
 ## Commands
 

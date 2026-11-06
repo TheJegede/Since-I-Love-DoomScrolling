@@ -93,6 +93,17 @@ describe('App search', () => {
     expect(retry).toHaveBeenCalledTimes(1);
   });
 
+  it('ranks transcript matches as word matches and flags a failed transcript search', async () => {
+    useSemanticSearch.mockReturnValue(smart({ status: 'ready', textIds: new Set(['ai']), transcriptsFailed: false }));
+    await searchFor('heckler');
+    expect(cardTitles()).toEqual(['Prompt tricks']);
+    expect(screen.queryByText('Related')).toBeNull();
+
+    useSemanticSearch.mockReturnValue(smart({ status: 'ready', transcriptsFailed: true }));
+    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'hecklers' } });
+    expect(screen.getByText(/Transcript search unavailable/)).toBeInTheDocument();
+  });
+
   it('disables date ordering only while searching', async () => {
     await searchFor('comedy');
     expect(screen.getByLabelText('Order by date')).toBeDisabled();

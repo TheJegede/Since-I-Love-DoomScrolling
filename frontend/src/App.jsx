@@ -283,7 +283,7 @@ export default function App() {
       return sortOrder === 'newest' ? db - da : da - db;
     });
   // While searching: exact-word matches first, then meaning matches by closeness.
-  const { reels: filteredReels, relatedIds } = rankReels(dateSortedReels, searchQuery, smartSearch.scores);
+  const { reels: filteredReels, relatedIds } = rankReels(dateSortedReels, searchQuery, smartSearch.scores, smartSearch.textIds);
 
   const totalPages = Math.ceil(filteredReels.length / ITEMS_PER_PAGE) || 1;
   const startIndex = (currentPage - 1) * ITEMS_PER_PAGE;
@@ -351,6 +351,12 @@ export default function App() {
             {smartSearch.status === 'error' && (
               <p className="search-status search-status--error" role="status">
                 Smart search unavailable — showing exact matches only
+                <button type="button" className="search-status-retry" onClick={smartSearch.retry}>Retry</button>
+              </p>
+            )}
+            {smartSearch.transcriptsFailed && smartSearch.status !== 'error' && (
+              <p className="search-status search-status--error" role="status">
+                Transcript search unavailable — not searching transcripts or captions
                 <button type="button" className="search-status-retry" onClick={smartSearch.retry}>Retry</button>
               </p>
             )}
