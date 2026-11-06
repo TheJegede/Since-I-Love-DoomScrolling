@@ -131,6 +131,7 @@ def no_real_worker_db(monkeypatch):
     monkeypatch.setattr(db, "heartbeat", lambda: None, raising=False)
     monkeypatch.setattr(db, "claim_next_cluster_job", lambda: None, raising=False)
     monkeypatch.setattr(db, "recover_stale_cluster_jobs", lambda stale_before: 0, raising=False)
+    monkeypatch.setattr(db, "other_reels_with_url", lambda url, exclude_id: [], raising=False)
 
 
 @pytest.fixture
@@ -473,7 +474,7 @@ def test_worker_tick_success(monkeypatch, pipeline):
     saved = {}
     monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
     monkeypatch.setattr(main.db, "update_reel_result",
-                        lambda reel_id, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None:
+                        lambda reel_id, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None, url=None:
                         saved.update(id=reel_id, title=title))
     monkeypatch.setattr(main.db, "mark_failed", raiser(AssertionError("should not be marked failed")))
     assert main.worker_tick() is True
@@ -841,6 +842,38 @@ def test_audio_row_without_speech_or_caption_fails(monkeypatch, pipeline, worker
     assert kind == "failed" and args[0] == "a1" and "No spoken audio" in args[1]
 
 
+SHARED_URL = "https://www.instagram.com/reel/Z/?igsh=abc123"  # what the iPhone Shortcut stores
+
+
+def test_worker_saves_the_clean_url(monkeypatch, pipeline, worker_events):
+    queue_row(monkeypatch, id="s1", url=SHARED_URL)
+    assert main.worker_tick() is True
+    [(kind, saved)] = worker_events
+    assert kind == "done" and saved["url"] == REEL_URL
+
+
+def test_worker_drops_a_queued_copy_of_a_saved_reel(monkeypatch, worker_events):
+    deleted, asked = [], []
+    monkeypatch.setattr(main.db, "other_reels_with_url",
+                        lambda url, exclude_id: asked.append((url, exclude_id)) or [{"id": "old", "status": "done"}])
+    monkeypatch.setattr(main.db, "delete_reel", lambda reel_id: deleted.append(reel_id) or True)
+    monkeypatch.setattr(main, "_run_pipeline", raiser(AssertionError("a saved reel is not downloaded again")))
+    queue_row(monkeypatch, id="s1", url=SHARED_URL)
+
+    assert main.worker_tick() is True
+    assert asked == [(REEL_URL, "s1")]
+    assert deleted == ["s1"]
+    assert worker_events == []
+
+
+def test_worker_reprocesses_a_reel_whose_saved_copy_failed(monkeypatch, pipeline, worker_events):
+    """Sharing again after a failure (e.g. expired cookies) is a deliberate retry."""
+    monkeypatch.setattr(main.db, "other_reels_with_url", lambda url, exclude_id: [{"id": "old", "status": "cookies_expired"}])
+    queue_row(monkeypatch, id="s1", url=SHARED_URL)
+    assert main.worker_tick() is True
+    assert [kind for kind, _ in worker_events] == ["done"]
+
+
 def test_url_row_never_deletes_stored_audio(monkeypatch, pipeline, worker_events):
     """An audio_path on a URL row (e.g. inserted with the public key) must not delete an owner's upload."""
     queue_row(monkeypatch, id="u1", url=REEL_URL, audio_path="owners-upload.m4a")
@@ -937,6 +970,25 @@ def test_claim_next_cluster_job_returns_none_when_race_lost(monkeypatch):
     monkeypatch.setattr(db, "get_client", fake_client(LostRace()))
     assert REAL_CLAIM_NEXT_CLUSTER_JOB is not None, "db.claim_next_cluster_job is missing"
     assert REAL_CLAIM_NEXT_CLUSTER_JOB() is None
+
+
+# ---------------------------------------------------------------- one-time URL cleanup
+
+def test_url_cleanup_plan_fixes_links_and_keeps_one_copy_per_reel():
+    import normalize_urls
+    reel = lambda rid, url, status, created: {"id": rid, "url": url, "status": status, "created_at": created}
+    rows = [
+        reel("a", "https://www.instagram.com/reel/A/?igsh=1", "done", "2026-01-01"),     # only copy: clean its link
+        reel("b1", "https://www.instagram.com/reel/B/", "done", "2026-02-02"),
+        reel("b2", "https://www.instagram.com/reel/B/?xtok=9", "done", "2026-01-01"),   # oldest finished copy wins
+        reel("c1", "https://www.instagram.com/reel/C/?srtk=2", "failed", "2026-01-01"),
+        reel("c2", "https://www.instagram.com/reel/C/", "done", "2026-03-03"),          # a finished copy beats an older failure
+        reel("d", "https://www.instagram.com/reel/D/", "done", "2026-01-01"),           # already clean, alone: untouched
+        reel("e", None, "done", "2026-01-01"),                                          # pasted text: no URL
+    ]
+    plan = normalize_urls.plan(rows)
+    assert plan["updates"] == [("a", "https://www.instagram.com/reel/A/"), ("b2", "https://www.instagram.com/reel/B/")]
+    assert [(drop, keep) for drop, keep, _ in plan["duplicates"]] == [("b1", "b2"), ("c1", "c2")]
 
 
 # ---------------------------------------------------------------- backup export

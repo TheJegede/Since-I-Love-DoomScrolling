@@ -76,6 +76,12 @@ def row_to_record(r: dict) -> dict:
     }
 
 
+def other_reels_with_url(url: str, exclude_id: str) -> list:
+    """[{id, status}] of every row except exclude_id saved under exactly this URL."""
+    res = get_client().table(TABLE).select("id, status").eq("url", url).neq("id", exclude_id).execute()
+    return res.data or []
+
+
 def get_reel_by_url(url: str) -> Optional[dict]:
     res = get_client().table(TABLE).select("*").eq("url", url).limit(1).execute()
     rows = res.data or []
@@ -148,6 +154,10 @@ def reels_missing_embedding() -> list:
     return _select_newest_first("id, extracted_json", refine=lambda q: q.is_("embedding", "null"))
 
 
+def set_url(reel_id: str, url: str) -> None:
+    get_client().table(TABLE).update({"url": url}).eq("id", reel_id).execute()
+
+
 def set_embedding(reel_id: str, embedding: list) -> None:
     get_client().table(TABLE).update({"embedding": embedding}).eq("id", reel_id).execute()
 
@@ -213,8 +223,9 @@ def claim_next_pending() -> Optional[dict]:
 
 
 def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
-                       extracted_json, status: str = "done", embedding=None, cluster=None) -> None:
-    """Write pipeline results back onto an existing (claimed) row."""
+                       extracted_json, status: str = "done", embedding=None, cluster=None,
+                       url: Optional[str] = None) -> None:
+    """Write pipeline results back onto an existing (claimed) row; url replaces a raw share link."""
     payload = {
         "title": title,
         "raw_transcript": raw_transcript,
@@ -229,6 +240,8 @@ def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
         payload["embedding"] = embedding
     if cluster is not None:
         payload["cluster"] = cluster
+    if url is not None:
+        payload["url"] = url
     get_client().table(TABLE).update(payload).eq("id", reel_id).execute()
 
 
