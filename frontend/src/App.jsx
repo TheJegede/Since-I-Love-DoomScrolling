@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
-import { supabase, rowToRecord } from './supabaseClient';
+import { supabase, rowToRecord, REEL_COLUMNS } from './supabaseClient';
 import { API_BASE_URL, fetchWithAuth } from './api';
 import { Skeleton, TableSkeleton } from './components/Skeletons';
 import ReelModal from './components/ReelModal';
@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 25;
-const REEL_COLUMNS = 'id, url, title, extracted_json, created_at, cluster, status, error';
 // shortcut: refreshes only the oldest 100 queued reels per tick (the worker claims oldest first); fine at ~1 reel/min.
 const MAX_REFRESH_IDS = 100;
 

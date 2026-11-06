@@ -3,8 +3,11 @@ import { createClient } from '@supabase/supabase-js';
 const url = import.meta.env.VITE_SUPABASE_URL;
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Null when unconfigured (e.g. a pure-local run that still talks to FastAPI).
+// Null when unconfigured; the dashboard then shows a configuration error.
 export const supabase = url && anonKey ? createClient(url, anonKey) : null;
+
+// The list view's columns; transcripts and captions are fetched per reel when opened.
+export const REEL_COLUMNS = 'id, url, title, extracted_json, created_at, cluster, status, error, audio_path';
 
 /** Map a Supabase row to the record shape the UI already renders. */
 export function rowToRecord(r) {
@@ -23,5 +26,6 @@ export function rowToRecord(r) {
     cluster: r.cluster || 'Unclustered',
     status: r.status || 'done',
     error: r.error || null,
+    audio_path: r.audio_path || null,
   };
 }

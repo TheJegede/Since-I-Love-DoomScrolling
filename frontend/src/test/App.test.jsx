@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 const table = vi.hoisted(() => ({ rows: [] }));
-vi.mock('../supabaseClient', async () => ({
+vi.mock('../supabaseClient', async (importOriginal) => ({
+  ...(await importOriginal()),
   supabase: (await import('./fakeSupabase')).fakeSupabase(() => table.rows),
   rowToRecord: (r) => r,
 }));
