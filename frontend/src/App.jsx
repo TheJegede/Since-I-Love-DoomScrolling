@@ -7,6 +7,8 @@ import ReelModal from './components/ReelModal';
 import InsightsTable from './components/InsightsTable';
 import ReelCard from './components/ReelCard';
 import IngestionPanel from './components/IngestionPanel';
+import Login from './components/Login';
+import { useSession } from './useSession';
 import { rankReels, useSemanticSearch } from './semanticSearch';
 import {
   Clapperboard,
@@ -18,7 +20,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Sun,
-  Moon
+  Moon,
+  LogOut
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 25;
@@ -57,7 +60,16 @@ function computeClusters(reels) {
 }
 
 
+// Row-level security returns empty results (not errors) to a signed-out browser,
+// so the library is only shown once a session exists; otherwise the login screen.
 export default function App() {
+  const { session, loading } = useSession();
+  if (supabase && loading) return <main className="login-shell" aria-busy="true" />;
+  if (supabase && !session) return <Login />;
+  return <Dashboard />;
+}
+
+function Dashboard() {
   const [reels, setReels] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isFetching, setIsFetching] = useState(true);
@@ -335,6 +347,12 @@ export default function App() {
             {theme === 'light' ? <Moon size={15} /> : <Sun size={15} />}
             <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
           </button>
+          {supabase && (
+            <button className="theme-toggle-btn" onClick={() => supabase.auth.signOut()}>
+              <LogOut size={15} />
+              <span>Sign out</span>
+            </button>
+          )}
         </div>
       </header>
 
