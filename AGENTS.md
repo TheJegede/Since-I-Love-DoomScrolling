@@ -12,7 +12,7 @@ Two independent apps + a shared Supabase Postgres database. No shared build.
 
 - **`backend/`** — Python FastAPI app. The pipeline lives in `main.py`; all persistence goes through `db.py` (Supabase data layer). `main.py` never touches the DB driver directly.
 - **`frontend/`** — React 19 + Vite SPA (`src/App.jsx` shell + `src/components/`). Reads reels **directly from Supabase** via `supabaseClient.js`; writes (ingestion, recompute, retry, delete) go through the backend HTTP API.
-- **Supabase** — single `saved_reels` table, source of truth for both apps. Schema managed in Supabase (SQL Editor), **not** in code. `init_local_db` only verifies env vars are present.
+- **Supabase** — single `saved_reels` table, source of truth for both apps. Schema managed in Supabase (SQL Editor), **not** in code.
 
 ### Two roles, one queue
 A `saved_reels` row has a `status`: `pending → processing → done`, or a failure status (`failed`, `cookies_expired`, `unsupported_format` — `db.FAILURE_STATUSES`). This drives a producer/worker split:
@@ -22,7 +22,7 @@ A `saved_reels` row has a `status`: `pending → processing → done`, or a fail
 
 One loop, `run_worker()` in `main.py`, runs two ways:
 - In-process background thread, started on FastAPI startup unless `ENABLE_WORKER=0` or running on an HF Space.
-- Standalone `run_worker.py` — no FastAPI server. This is the **local worker** that processes shares from the iPhone Shortcut (IG blocks datacenter IPs, so the worker must run on a residential machine, not HF). `--drain` exits once the queue is empty; `schedule_worker.ps1` registers that as a 5-minute scheduled task.
+- Standalone `run_worker.py` — no FastAPI server. This is the **local worker** that processes shares from the iPhone Shortcut (IG blocks datacenter IPs, so the worker must run on a residential machine, not HF). `--drain` exits once the queue is empty; `schedule_worker.ps1` registers that as a 5-minute scheduled task (runs `.venv\Scripts\pythonw.exe`, so no console window).
 
 ### Backend pipeline (`backend/main.py`)
 Core flow: `download → transcribe → extract → persist` (`_run_pipeline`).
@@ -32,9 +32,8 @@ Core flow: `download → transcribe → extract → persist` (`_run_pipeline`).
 - `POST /extract/text` — skips download + transcription; runs LLM extraction on pasted transcript/caption directly.
 - `POST /extract/batch` — accepts an uploaded `saved_posts.json`, parses reel URLs (`saved_parser.parse_saved_posts`), inserts new ones as `pending`, and tracks progress in the in-memory `BATCH_JOB`. The worker drains them.
 - `GET /extract/batch/status` — aggregates progress by querying Supabase for the tracked URLs' statuses.
-- `GET /reels` — lists saved rows (fallback for a frontend without Supabase config).
-- `GET /reels/{id}/details` — transcript + caption for one reel. `POST /reels/{id}/retry` — requeue a failed reel. `DELETE /reels/{id}` — removes a row.
-- `POST /clusters/recompute` — regroups all extracted reels into 8–12 topic clusters in a background task (`cluster_topics_semantically`): local embeddings (fastembed) → k-means (scikit-learn) → one LLM call to name the clusters. Queued/failed reels are reset to Unclustered. Poll `GET /clusters/recompute/status`. Run manually from the dashboard; new reels have `cluster: null` until then.
+- `POST /reels/{id}/retry` — requeue a failed reel. `DELETE /reels/{id}` — removes a row.
+- `POST /clusters/recompute` — regroups all extracted reels into 8–12 topic clusters in a background task (`cluster_topics_semantically`): the stored search embeddings (missing ones are embedded and saved on the spot) → k-means (scikit-learn) → one LLM call to name the clusters. Queued/failed reels are reset to Unclustered. Poll `GET /clusters/recompute/status`. Run manually from the dashboard. Between recomputes, every save path (`search_fields`) gives a new reel the cluster of its closest already-clustered reel (`db.nearest_cluster` via `match_reels`, similarity ≥ 0.4); with no close neighbour it stays Unclustered.
 - `GET /health` — frontend polls it to detect a cold/sleeping HF backend.
 
 Endpoints are plain `def` on purpose: the pipeline and Supabase calls block, so FastAPI must run them in its threadpool. Write endpoints require an `X-API-Key` header when `API_AUTH_TOKEN` is set.
@@ -49,7 +48,7 @@ Key behaviors to preserve when editing:
 - **Temp files** are always cleaned up in a `finally` block.
 
 ### Data layer (`backend/db.py`)
-Every DB op lives here. Backend authenticates with the Supabase **service role** key (bypasses RLS) — must only run on a trusted machine. `row_to_record` maps raw rows to the API shape the frontend expects. Queue primitives: `claim_next_pending`, `update_reel_result`, `mark_failed`, `schedule_retry`, `recover_stale_processing`, `retry_reel`. Search embeddings: `reels_missing_embedding`, `set_embedding`, and the optional `embedding` argument on `insert_reel` / `update_reel_result`. Supabase returns at most 1000 rows per request, so full-table reads page (`_select_newest_first`) and `in` filters are chunked. The legacy `backend/local_storage.db` SQLite file is **unused** (pre-migration artifact).
+Every DB op lives here. Backend authenticates with the Supabase **service role** key (bypasses RLS) — must only run on a trusted machine. `row_to_record` maps raw rows to the API shape the frontend expects. Queue primitives: `claim_next_pending`, `update_reel_result`, `mark_failed`, `schedule_retry`, `recover_stale_processing`, `retry_reel`. Search embeddings: `reels_missing_embedding`, `set_embedding`, and the optional `embedding` / `cluster` arguments on `insert_reel` / `update_reel_result`. Clustering: `reels_for_clustering` (parses pgvector text into floats), `nearest_cluster`, `set_cluster`. Supabase returns at most 1000 rows per request, so full-table reads page (`_select_newest_first`) and `in` filters are chunked. The legacy `backend/local_storage.db` SQLite file is **unused** (pre-migration artifact).
 
 ### Frontend (`frontend/src/`)
 - `App.jsx` — shell: loads reels, owns search/cluster/tool/date filters, pagination, the selected reel, and cluster recompute. The cluster list is derived from the loaded reels.
@@ -59,7 +58,7 @@ Every DB op lives here. Backend authenticates with the Supabase **service role**
 - `semanticSearch.js` — `rankReels` (exact-word matches first, then meaning matches) and `useSemanticSearch` (embeds the query in the browser via `queryEmbedder.js`, then calls the Supabase `match_reels` function). Without Supabase config, search is exact-word only.
 
 Two data channels:
-- **Reads** — if the `supabase` client is configured (`VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`), `fetchAllReelRows` pages through the whole table via supabase-js. Falls back to `GET /reels` otherwise.
+- **Reads** — if the `supabase` client is configured (`VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY`), `fetchAllReelRows` pages through the whole table via supabase-js; without that config the dashboard shows an error. While reels are queued it re-fetches only those rows every 5s.
 - **Writes** — ingestion, `/clusters/recompute`, retry and delete go through `API_BASE_URL`.
 
 Cluster/tool/date filters and exact-word search run **in-memory**; meaning matches come from Supabase (`match_reels`) and are merged in by `rankReels`. A status line under the search bar says when smart search is still loading or unavailable. Checks `/health` on load for backend warm-up and re-fetches every 5s while any reel is queued. Styles live in `index.css` (tokens + base) and `App.css` (layout + components); avoid inline `style` except for values computed at runtime.

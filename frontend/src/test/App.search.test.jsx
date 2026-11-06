@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
 const useSemanticSearch = vi.hoisted(() => vi.fn());
-vi.mock('../supabaseClient', () => ({ supabase: null, rowToRecord: (r) => r }));
+vi.mock('../supabaseClient', async () => ({
+  supabase: (await import('./fakeSupabase')).fakeSupabase(() => REELS),
+  rowToRecord: (r) => r,
+}));
 vi.mock('../semanticSearch', async (importOriginal) => ({
   ...(await importOriginal()),
   useSemanticSearch,
@@ -38,7 +41,6 @@ beforeEach(() => {
   globalThis.fetch = vi.fn((input) => {
     const u = String(input);
     if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-    if (u.includes('/reels')) return Promise.resolve({ ok: true, json: () => Promise.resolve(REELS) });
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
   });
 });

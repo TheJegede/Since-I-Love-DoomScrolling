@@ -101,19 +101,11 @@ export default function App() {
 
   const fetchReels = async () => {
     try {
-      if (supabase) {
-        const mapped = (await fetchAllReelRows()).map(rowToRecord);
-        setReels(mapped);
-        return;
-      }
-      // Fallback: local FastAPI backend
-      const response = await fetch(`${API_BASE_URL}/reels?limit=10000`);
-      if (response.ok) {
-        const data = await response.json();
-        setReels(data);
-      }
+      if (!supabase) throw new Error('Supabase is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.');
+      setReels((await fetchAllReelRows()).map(rowToRecord));
     } catch (err) {
       console.error("Error fetching reels", err);
+      setError(`Could not load your reels. ${err.message}`);
     } finally {
       setIsFetching(false);
     }
@@ -146,7 +138,6 @@ export default function App() {
     const id = setInterval(async () => {
       const ids = activeIdsRef.current.slice(-MAX_REFRESH_IDS);
       if (!ids.length) return;
-      if (!supabase) return fetchReels();
       const { data, error } = await supabase.from('saved_reels').select(REEL_COLUMNS).in('id', ids);
       if (error) return console.error("Error refreshing queued reels", error);
       const fresh = new Map(data.map(r => [r.id, rowToRecord(r)]));
@@ -244,24 +235,12 @@ export default function App() {
     }
 
     try {
-      let details = null;
-      if (supabase) {
-        const { data, error } = await supabase
-          .from('saved_reels')
-          .select('raw_transcript, post_caption')
-          .eq('id', reel.id)
-          .single();
-        if (!error && data) {
-          details = data;
-        }
-      } else {
-        const res = await fetchWithAuth(`${API_BASE_URL}/reels/${reel.id}/details`);
-        if (res.ok) {
-          details = await res.json();
-        }
-      }
-      
-      if (details) {
+      const { data: details, error } = await supabase
+        .from('saved_reels')
+        .select('raw_transcript, post_caption')
+        .eq('id', reel.id)
+        .single();
+      if (!error && details) {
         const fullReel = { ...reel, ...details };
         setSelectedReel(fullReel);
         // Cache full details inside local state list

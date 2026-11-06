@@ -21,6 +21,7 @@ from main import ReelExtraction
 from saved_parser import normalize_instagram_url, parse_saved_posts
 
 client = TestClient(main.app)
+REAL_NEAREST_CLUSTER = db.nearest_cluster  # every test stubs it; one test checks the real one
 
 REEL_URL = "https://www.instagram.com/reel/Z/"
 LONG_TRANSCRIPT = " ".join(["word"] * 30)  # clears the 15-word silent-hook guard
@@ -29,7 +30,7 @@ EXTRACTION = ReelExtraction(
     core_topic="Topic", key_takeaway="Takeaway", action_items=["a"], tools_or_resources=["b"])
 
 
-def fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json, embedding=None):
+def fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None):
     return {"id": "id-1", "url": url, "title": title, "raw_transcript": raw_transcript,
             "post_caption": post_caption, "extracted_json": extracted_json,
             "created_at": "2026-06-06T00:00:00Z"}
@@ -119,6 +120,7 @@ class FakeEmbeddingModel:
 def no_embedding_model(monkeypatch):
     """Never load the real embedding model in tests; embed_reel then returns None."""
     monkeypatch.setattr(main, "_get_embedding_model", raiser(RuntimeError("no embedding model in tests")))
+    monkeypatch.setattr(db, "nearest_cluster", lambda embedding, min_similarity: None)  # never hit the real DB
 
 
 @pytest.fixture
@@ -249,25 +251,6 @@ def test_delete_reel(monkeypatch):
     assert client.delete("/reels/abc").status_code == 404
 
 
-def test_get_reel_details(monkeypatch):
-    monkeypatch.setattr(main.db, "get_reel_details",
-                        lambda rid: {"raw_transcript": "t", "post_caption": "c"} if rid == "abc" else None)
-    r = client.get("/reels/abc/details")
-    assert r.status_code == 200, r.text
-    assert r.json() == {"raw_transcript": "t", "post_caption": "c"}
-    assert client.get("/reels/missing/details").status_code == 404
-
-
-def test_reels_include_cluster(monkeypatch):
-    monkeypatch.setattr(main.db, "list_reels", lambda limit=20: [{
-        "id": "x", "url": None, "title": "t", "raw_transcript": None,
-        "post_caption": None, "extracted_json": {"core_topic": "c"},
-        "created_at": "2026-06-06T00:00:00Z", "cluster": "Unclustered"}])
-    r = client.get("/reels")
-    assert r.status_code == 200, r.text
-    assert "cluster" in r.json()[0]
-
-
 def test_recompute_clusters(monkeypatch, embedding_model):
     rows = [
         {"id": "a", "extracted_json": {"core_topic": "AI email tools"}, "embedding": [0.1] * 384},
@@ -296,6 +279,30 @@ def test_recompute_clusters(monkeypatch, embedding_model):
     assert ("c", None) in applied, "unextracted reel should be reset to Unclustered"
     assert [item["embedding"] for item in clustered] == [[0.1] * 384, FAKE_VECTOR], "stored vectors are reused"
     assert stored == ["b"], "a reel missing its embedding is repaired, not skipped"
+
+
+def test_new_reel_starts_in_its_nearest_neighbours_cluster(monkeypatch, embedding_model):
+    asked = []
+    monkeypatch.setattr(db, "nearest_cluster",
+                        lambda embedding, min_similarity: asked.append(min_similarity) or "Fitness")
+    assert main.search_fields({"core_topic": "Marathon training"}) == {"embedding": FAKE_VECTOR, "cluster": "Fitness"}
+    assert asked == [0.4]
+
+    monkeypatch.setattr(db, "nearest_cluster", raiser(RuntimeError("rpc down")))
+    assert main.search_fields({"core_topic": "x"}) == {"embedding": FAKE_VECTOR, "cluster": None}
+    assert main.search_fields({}) == {"embedding": None, "cluster": None}
+
+
+def test_nearest_cluster_skips_unclustered_neighbours(monkeypatch):
+    class RpcClient:
+        def rpc(self, name, params):
+            assert name == "match_reels"
+            return type("Q", (), {"execute": lambda self: type("R", (), {"data": [{"id": "new"}, {"id": "old"}]})()})()
+
+        def table(self, name):
+            return FakeTable([{"id": "new", "cluster": None}, {"id": "old", "cluster": "Fitness"}])
+    monkeypatch.setattr(db, "get_client", lambda: RpcClient())
+    assert REAL_NEAREST_CLUSTER([0.1] * 384, 0.4) == "Fitness"
 
 
 def test_reels_for_clustering_parses_pgvector_text(monkeypatch):
@@ -358,7 +365,7 @@ def test_embed_reel_drops_a_vector_the_database_cannot_store(monkeypatch):
 def test_every_save_path_stores_an_embedding(monkeypatch, pipeline, embedding_model):
     saved = []
 
-    def record_insert(url, title, raw_transcript, post_caption, extracted_json, embedding=None):
+    def record_insert(url, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None):
         saved.append(embedding)
         return fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json)
 
@@ -379,7 +386,7 @@ def test_every_save_path_stores_an_embedding(monkeypatch, pipeline, embedding_mo
 def test_reel_still_saves_when_embedding_fails(monkeypatch):
     saved = {}
 
-    def record_insert(url, title, raw_transcript, post_caption, extracted_json, embedding=None):
+    def record_insert(url, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None):
         saved["embedding"] = embedding
         return fake_insert_reel(url, title, raw_transcript, post_caption, extracted_json)
 
@@ -416,7 +423,7 @@ def test_worker_tick_success(monkeypatch, pipeline):
     saved = {}
     monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
     monkeypatch.setattr(main.db, "update_reel_result",
-                        lambda reel_id, title, raw_transcript, post_caption, extracted_json, embedding=None:
+                        lambda reel_id, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None:
                         saved.update(id=reel_id, title=title))
     monkeypatch.setattr(main.db, "mark_failed", raiser(AssertionError("should not be marked failed")))
     assert main.worker_tick() is True

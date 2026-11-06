@@ -82,7 +82,7 @@ def get_reel_by_url(url: str) -> Optional[dict]:
 
 
 def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
-                status="done", source=None, embedding=None) -> dict:
+                status="done", source=None, embedding=None, cluster=None) -> dict:
     row = {
         "id": str(uuid.uuid4()),
         "url": url,
@@ -96,13 +96,10 @@ def insert_reel(url, title, raw_transcript, post_caption, extracted_json,
     }
     if embedding is not None:
         row["embedding"] = embedding  # list -> pgvector
+    if cluster is not None:
+        row["cluster"] = cluster
     get_client().table(TABLE).insert(row).execute()
     return row_to_record(row)
-
-
-def list_reels(limit: int = 20) -> list:
-    columns = "id, url, title, extracted_json, created_at, cluster, status, error"
-    return [row_to_record(r) for r in _select_newest_first(columns, limit)]
 
 
 def statuses_for_urls(urls: list) -> list:
@@ -134,13 +131,6 @@ def insert_pending_reels(reels: list, source: str) -> None:
         get_client().table(TABLE).insert(chunk).execute()
 
 
-def get_reel_details(reel_id: str) -> Optional[dict]:
-    """Retrieve only raw_transcript and post_caption fields for a reel."""
-    res = get_client().table(TABLE).select("raw_transcript, post_caption").eq("id", reel_id).limit(1).execute()
-    rows = res.data or []
-    return rows[0] if rows else None
-
-
 def reels_for_clustering() -> list:
     """Every row as {id, extracted_json, embedding}, with embedding as a list of floats or None."""
     rows = []
@@ -159,6 +149,19 @@ def reels_missing_embedding() -> list:
 
 def set_embedding(reel_id: str, embedding: list) -> None:
     get_client().table(TABLE).update({"embedding": embedding}).eq("id", reel_id).execute()
+
+
+def nearest_cluster(embedding: list, min_similarity: float) -> Optional[str]:
+    """Cluster of the most similar already-clustered reel at or above min_similarity, else None."""
+    c = get_client()
+    matches = c.rpc("match_reels", {"query_embedding": embedding, "match_threshold": min_similarity,
+                                    "match_count": 10}).execute().data or []
+    ids = [m["id"] for m in matches]  # closest first
+    if not ids:
+        return None
+    rows = c.table(TABLE).select("id, cluster").in_("id", ids).execute().data or []
+    clusters = {r["id"]: r["cluster"] for r in rows if r.get("cluster")}
+    return next((clusters[i] for i in ids if i in clusters), None)
 
 
 def set_cluster(reel_ids: list, cluster: Optional[str]) -> None:
@@ -201,7 +204,7 @@ def claim_next_pending() -> Optional[dict]:
 
 
 def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
-                       extracted_json, status: str = "done", embedding=None) -> None:
+                       extracted_json, status: str = "done", embedding=None, cluster=None) -> None:
     """Write pipeline results back onto an existing (claimed) row."""
     payload = {
         "title": title,
@@ -215,6 +218,8 @@ def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
     }
     if embedding is not None:
         payload["embedding"] = embedding
+    if cluster is not None:
+        payload["cluster"] = cluster
     get_client().table(TABLE).update(payload).eq("id", reel_id).execute()
 
 

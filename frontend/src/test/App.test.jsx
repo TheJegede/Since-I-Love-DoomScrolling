@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
-// supabase null => App falls back to fetch('/reels'); we mock fetch instead.
-vi.mock('../supabaseClient', () => ({
-  supabase: null,
+const table = vi.hoisted(() => ({ rows: [] }));
+vi.mock('../supabaseClient', async () => ({
+  supabase: (await import('./fakeSupabase')).fakeSupabase(() => table.rows),
   rowToRecord: (r) => r,
 }));
 
@@ -11,11 +11,10 @@ import App from '../App';
 
 beforeEach(() => {
   vi.restoreAllMocks();
-  // /health ok, /reels empty by default
+  table.rows = [];
   globalThis.fetch = vi.fn((input) => {
     const u = String(input);
     if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-    if (u.includes('/reels')) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
     return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
   });
 });
@@ -51,7 +50,6 @@ describe('App baseline', () => {
     globalThis.fetch = vi.fn((input, options) => {
       const u = String(input);
       if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-      if (u.includes('/reels')) return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
       if (u.includes('/extract/url')) {
         if (firstPost) {
           firstPost = false;
@@ -147,13 +145,7 @@ describe('App baseline', () => {
       cluster: 'Unclustered',
       status: 'done'
     }));
-
-    globalThis.fetch = vi.fn((input) => {
-      const u = String(input);
-      if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-      if (u.includes('/reels')) return Promise.resolve({ ok: true, json: () => Promise.resolve(mockReels) });
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-    });
+    table.rows = mockReels;
 
     render(<App />);
 
@@ -185,31 +177,5 @@ describe('App baseline', () => {
     // Page 1 items should be back
     await screen.findByText('Reel Title 0');
     expect(screen.queryByText('Reel Title 25')).toBeNull();
-  });
-
-  it('searches by exact words without Supabase and shows no smart-search status', async () => {
-    const mockReels = ['Comedy writing', 'AI tools'].map((topic, i) => ({
-      id: `reel_${i}`,
-      title: `Reel Title ${i}`,
-      url: `https://instagram.com/reel/abc_${i}/`,
-      extracted_json: { core_topic: topic, key_takeaway: '', action_items: [], tools_or_resources: [] },
-      created_at: new Date(2026, 5, 20 - i).toISOString(),
-      cluster: 'Unclustered',
-      status: 'done'
-    }));
-    globalThis.fetch = vi.fn((input) => {
-      const u = String(input);
-      if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-      if (u.includes('/reels')) return Promise.resolve({ ok: true, json: () => Promise.resolve(mockReels) });
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-    });
-
-    render(<App />);
-    await screen.findByText('Reel Title 0');
-    fireEvent.change(screen.getByLabelText('Search'), { target: { value: 'comedy' } });
-
-    expect(screen.getByText('Reel Title 0')).toBeInTheDocument();
-    expect(screen.queryByText('Reel Title 1')).toBeNull();
-    expect(screen.queryByText(/Smart search/)).toBeNull();
   });
 });

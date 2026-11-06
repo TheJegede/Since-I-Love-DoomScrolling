@@ -9,7 +9,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from typing import List, Optional
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Query, BackgroundTasks, Depends, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, BackgroundTasks, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 import yt_dlp
@@ -81,16 +81,7 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
             raise HTTPException(status_code=401, detail="Unauthorized API access. Valid X-API-Key header required.")
 
 
-def init_local_db():
-    """Schema is managed in Supabase (see docs). This only verifies config presence."""
-    if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_KEY"):
-        logger.warning("SUPABASE_URL / SUPABASE_SERVICE_KEY not set — DB calls will fail.")
-    else:
-        logger.info("Supabase configuration detected.")
-
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
-# Initialize main database
-init_local_db()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -276,6 +267,26 @@ def embed_reel(extracted_json: Optional[dict]) -> Optional[List[float]]:
                        len(vector), EMBEDDING_DIMENSIONS)
         return None
     return vector
+
+
+# Same bar as the dashboard's smart search: unrelated topics peaked at 0.39 similarity.
+NEAREST_CLUSTER_MIN_SIMILARITY = 0.4
+
+
+def search_fields(extracted_json: Optional[dict]) -> dict:
+    """The embedding and a starting cluster for a reel being saved.
+
+    The cluster is copied from the closest already-clustered reel so new reels
+    don't sit in Unclustered until the next recompute. Never raises: a reel
+    without a close neighbour (or with the lookup down) just stays Unclustered."""
+    embedding = embed_reel(extracted_json)
+    cluster = None
+    if embedding is not None:
+        try:
+            cluster = db.nearest_cluster(embedding, NEAREST_CLUSTER_MIN_SIMILARITY)
+        except Exception as e:
+            logger.warning(f"Could not find a starting cluster for reel: {e}")
+    return {"embedding": embedding, "cluster": cluster}
 
 
 def _target_cluster_count(item_count: int) -> int:
@@ -549,15 +560,6 @@ def health_check():
     """Simple health check endpoint used to check API health."""
     return {"status": "ok", "message": "Extractor service is awake and running."}
 
-@app.get("/reels")
-def list_reels(limit: int = Query(20, description="Max number of items to return")):
-    """Retrieve saved reels from Supabase."""
-    try:
-        return db.list_reels(limit=limit)
-    except Exception as e:
-        logger.error(f"Error fetching reels: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch reels: {str(e)}")
-
 @app.delete("/reels/{reel_id}", dependencies=[Depends(verify_api_key)])
 def delete_reel(reel_id: str):
     """Delete a single saved reel by id. 404 if it does not exist."""
@@ -584,20 +586,6 @@ def retry_reel(reel_id: str):
     except Exception as e:
         logger.error(f"Retry enqueue failed: {e}")
         raise HTTPException(status_code=500, detail=f"Retry enqueue failed: {e}")
-
-@app.get("/reels/{reel_id}/details")
-def get_reel_details(reel_id: str):
-    """Retrieve full details (transcript and caption) for a specific reel."""
-    try:
-        details = db.get_reel_details(reel_id)
-        if not details:
-            raise HTTPException(status_code=404, detail="Reel not found.")
-        return details
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching reel details: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch details: {str(e)}")
 
 CLUSTER_JOB = {
     "status": "idle",  # idle | running | done | error
@@ -735,7 +723,7 @@ def process_reel_url(url: str) -> dict:
         raw_transcript=raw_transcript,
         post_caption=post_caption,
         extracted_json=extracted_json,
-        embedding=embed_reel(extracted_json),
+        **search_fields(extracted_json),
     )
 
 
@@ -777,7 +765,7 @@ def process_pending_reel(row: dict) -> None:
             raw_transcript=raw_transcript,
             post_caption=post_caption,
             extracted_json=extracted_json,
-            embedding=embed_reel(extracted_json),
+            **search_fields(extracted_json),
         )
         logger.info(f"Worker processed reel {reel_id} ({url})")
     except HTTPException as e:
@@ -902,7 +890,7 @@ def extract_file(
             raw_transcript=raw_transcript,
             post_caption=caption,
             extracted_json=extracted_json,
-            embedding=embed_reel(extracted_json),
+            **search_fields(extracted_json),
         )
     finally:
         if os.path.exists(temp_file_path):
@@ -932,7 +920,7 @@ def extract_text(payload: dict):
         raw_transcript=transcript,
         post_caption=caption,
         extracted_json=extracted_json,
-        embedding=embed_reel(extracted_json),
+        **search_fields(extracted_json),
     )
 
 

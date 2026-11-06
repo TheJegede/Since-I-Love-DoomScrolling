@@ -221,7 +221,6 @@ Base URL (local): `http://localhost:8000` · (production): `https://whoisluwah-t
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/health` | Health check — used by the frontend to detect cold starts |
-| `GET` | `/reels` | List all saved reels |
 | `DELETE` | `/reels/{id}` | Delete a reel |
 | `POST` | `/extract/url` | Full pipeline: download → transcribe → extract → save |
 | `POST` | `/extract/file` | Skip download; transcribe an uploaded audio file |
@@ -229,7 +228,6 @@ Base URL (local): `http://localhost:8000` · (production): `https://whoisluwah-t
 | `POST` | `/extract/batch` | Upload `saved_posts.json`; inserts rows as `pending` for worker |
 | `GET` | `/extract/batch/status` | Poll active batch job progress |
 | `POST` | `/reels/{id}/retry` | Requeue a failed reel for the worker |
-| `GET` | `/reels/{id}/details` | Transcript + caption for one reel |
 | `POST` | `/clusters/recompute` | Regroup all reels into topic clusters in the background (local embeddings + one LLM call to name them) |
 | `GET` | `/clusters/recompute/status` | Poll the recompute job |
 
@@ -304,7 +302,7 @@ Set these env vars in your Vercel project dashboard:
 | **Instagram 403 errors** | Re-export `cookies.txt` from your browser and replace `backend/cookies.txt` |
 | **HF Space cold start** | First request after idle takes 30–60s — retry if the Shortcut times out |
 | **Supabase rejects service key from PowerShell** | Use `python backend/db.py` / Python scripts for admin queries, not raw PowerShell REST calls |
-| **New reels have `cluster: null`** | Expected — run "Recompute Clusters" from the dashboard to assign themes |
+| **New reel shows as Unclustered** | No similar reel had a cluster yet — run "Recompute clusters" from the dashboard |
 | **DNS resolution failures (`*.supabase.co`)** | Set your network DNS to `1.1.1.1` / `8.8.8.8` |
 
 ---

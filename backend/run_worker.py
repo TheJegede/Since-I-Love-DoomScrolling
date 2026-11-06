@@ -5,6 +5,9 @@ Pass --drain to exit once the queue is empty instead of idling.
 import os
 import sys
 
+if sys.stderr is None:  # pythonw.exe (the scheduled task) has no console; give logging and yt-dlp somewhere to write
+    sys.stdout = sys.stderr = open(os.devnull, "w")
+
 import yt_dlp
 
 from main import logger, run_worker  # importing main loads .env and configures logging
