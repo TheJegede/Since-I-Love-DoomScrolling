@@ -3,6 +3,7 @@
 Run from the repo root:  python -m pytest backend
 """
 import io
+import json
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -757,3 +758,13 @@ def test_embedding_queue_helpers(monkeypatch):
     db.set_embedding("a", [0.5])
     assert table.payloads == [{"embedding": [0.5]}]
     assert ("eq", ("id", "a")) in table.filters
+
+
+# ---------------------------------------------------------------- backup export
+
+def test_export_writes_every_row(monkeypatch, tmp_path):
+    import export_reels
+    rows = [{"id": str(i), "url": f"u{i}", "extracted_json": {"core_topic": "t"}} for i in range(3)]
+    monkeypatch.setattr(db, "_select_newest_first", lambda columns: rows)
+    assert export_reels.export(tmp_path / "r.json") == 3
+    assert json.loads((tmp_path / "r.json").read_text(encoding="utf-8")) == rows
