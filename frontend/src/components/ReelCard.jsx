@@ -62,7 +62,7 @@ export default function ReelCard({ reel, onSelect, handleDelete, onRetry, checke
         <div className="card-processing-status">
           <div className="status-label">
             <span className={`status-dot-pulse ${reel.status}`}></span>
-            <span>{reel.status === 'processing' ? 'Processing Reel...' : reel.status === 'failed' ? 'Failed' : 'Queued'}</span>
+            <span>{reel.status === 'processing' ? 'Processing Reel...' : reel.status === 'pending' ? 'Queued' : 'Failed'}</span>
           </div>
           <div className="card-progress-track">
             <div className={`card-progress-fill ${reel.status}`}></div>
