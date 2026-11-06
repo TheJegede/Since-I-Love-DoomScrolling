@@ -19,6 +19,7 @@ def parse_saved_posts(data: list) -> list:
     Drops photo (/p/) posts because they lack audio.
     """
     items = []
+    seen = set()
     for entry in data:
         url = caption = title = ""
         for lv in entry.get("label_values", []):
@@ -31,5 +32,7 @@ def parse_saved_posts(data: list) -> list:
                 title = lv.get("value", "")
         if url and ("/reel/" in url or "/reels/" in url):
             clean_url = normalize_instagram_url(url)
-            items.append({"url": clean_url, "caption": caption, "title": title})
+            if clean_url not in seen:  # a reel saved to two collections is listed twice
+                seen.add(clean_url)
+                items.append({"url": clean_url, "caption": caption, "title": title})
     return items

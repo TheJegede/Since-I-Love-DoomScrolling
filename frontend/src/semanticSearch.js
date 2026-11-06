@@ -13,14 +13,18 @@ const NO_IDS = new Set();
 // Transcripts and captions are not loaded into the browser, so Supabase searches them.
 const TEXT_SEARCH_COLUMNS = ['raw_transcript', 'post_caption'];
 
+// A query word matches the start of a word in the text: "ai" finds "AI tools", not "email"; "tool" finds "tools".
+const wordStartPattern = (word) =>
+  new RegExp(`(?<![\\p{L}\\p{N}])${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u');
+
 // Every word of the query must appear somewhere in the reel's loaded fields, in any order.
-function matchesKeyword(reel, words) {
+function matchesKeyword(reel, patterns) {
   const ej = reel.extracted_json || {};
   const hay = [
     reel.title, ej.core_topic, ej.key_takeaway,
     ...(ej.tools_or_resources || []), ...(ej.action_items || [])
   ].filter(Boolean).join(' ').toLowerCase();
-  return words.every(word => hay.includes(word));
+  return patterns.every(pattern => pattern.test(hay));
 }
 
 /**
@@ -33,10 +37,11 @@ export function rankReels(reels, query, scores, textIds = NO_IDS) {
   const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const relatedIds = new Set();
   if (!words.length) return { reels, relatedIds };
+  const patterns = words.map(wordStartPattern);
 
   const ranked = [];
   for (const reel of reels) {
-    const keyword = matchesKeyword(reel, words) || textIds.has(reel.id);
+    const keyword = matchesKeyword(reel, patterns) || textIds.has(reel.id);
     const similarity = scores.get(reel.id);
     if (!keyword && similarity === undefined) continue;
     if (!keyword) relatedIds.add(reel.id);

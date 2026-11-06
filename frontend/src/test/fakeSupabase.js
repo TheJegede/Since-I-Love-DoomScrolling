@@ -5,7 +5,8 @@ export function fakeSupabase(getRows) {
       select: () => q,
       order: () => q,
       eq: () => q,
-      in: () => Promise.resolve({ data: [], error: null }),
+      in: (column, values) => Promise.resolve({ data: getRows().filter(r => values.includes(r[column])), error: null }),
+      gt: (column, value) => Promise.resolve({ data: getRows().filter(r => new Date(r[column]) > new Date(value)), error: null }),
       range: (from, to) => Promise.resolve({ data: getRows().slice(from, to + 1), error: null, count: getRows().length }),
       single: () => Promise.resolve({ data: { raw_transcript: '', post_caption: '' }, error: null }),
     };

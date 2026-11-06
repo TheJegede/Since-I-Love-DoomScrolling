@@ -94,8 +94,22 @@ describe('App baseline', () => {
     globalThis.fetch = vi.fn(() => Promise.resolve({ status: 401 }));
 
     await expect(fetchWithAuth('/clusters/recompute', { method: 'POST' })).rejects.toThrow(/Wrong API key/);
-    expect(setItemSpy).not.toHaveBeenCalledWith('transcriber_api_key', 'wrong_key');
     expect(removeItemSpy).toHaveBeenCalledWith('transcriber_api_key');
+    expect(localStorage.getItem('transcriber_api_key')).toBeNull();
+    expect(setItemSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('fetchWithAuth asks once when two requests need the key at the same time', async () => {
+    const { fetchWithAuth } = await import('../api');
+    localStorage.removeItem('transcriber_api_key');
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('good_key');
+    globalThis.fetch = vi.fn((url, options) =>
+      Promise.resolve({ status: options.headers?.['X-API-Key'] === 'good_key' ? 200 : 401 }));
+
+    const results = await Promise.all([fetchWithAuth('/a', {}), fetchWithAuth('/b', {})]);
+    expect(results.map(r => r.status)).toEqual([200, 200]);
+    expect(promptSpy).toHaveBeenCalledTimes(1);
+    localStorage.removeItem('transcriber_api_key');
   });
 
   it('shows the queue banner when the submitted URL is already queued', async () => {
@@ -127,6 +141,29 @@ describe('App baseline', () => {
 
     expect(await screen.findByText('In Ingestion Queue')).toBeInTheDocument();
     expect(screen.getByText('QUEUED →')).toBeInTheDocument();
+  });
+
+  it('polls for new reels, fills in queued ones, and drops queued ones deleted elsewhere', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const row = (id, title, status, day) => ({
+      id, title, status, url: `https://www.instagram.com/reel/${id}/`, cluster: 'Unclustered',
+      created_at: new Date(Date.UTC(2026, 5, day)).toISOString(),
+      extracted_json: status === 'done' ? { core_topic: `${title} topic`, key_takeaway: '', action_items: [], tools_or_resources: [] } : {},
+    });
+    table.rows = [row('old', 'Old reel', 'done', 1), row('queued', null, 'pending', 2), row('gone', null, 'pending', 3)];
+    try {
+      render(<App />);
+      await screen.findByText('Old reel');
+
+      table.rows = [row('old', 'Old reel', 'done', 1), row('queued', 'Finished reel', 'done', 2), row('new', 'Shared from phone', 'pending', 4)];
+      await vi.advanceTimersByTimeAsync(5000);
+
+      expect(await screen.findByText('Finished reel')).toBeInTheDocument();
+      expect(screen.getByText('Shared from phone')).toBeInTheDocument();
+      expect(screen.getAllByText('QUEUED →')).toHaveLength(1);  // only 'new'; 'gone' was dropped
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('paginates reels list to 25 items and updates page on clicking Next/Prev', async () => {

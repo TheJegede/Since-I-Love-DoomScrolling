@@ -62,11 +62,12 @@ export default function App() {
   const [reels, setReels] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isFetching, setIsFetching] = useState(true);
-  const [isWakingUp, setIsWakingUp] = useState(true);
+  const [isWakingUp, setIsWakingUp] = useState(false);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [theme, setTheme] = useState(() => localStorage.getItem('transcriber_theme') || 'dark');
   const activeIdsRef = useRef([]);
+  const newestCreatedAtRef = useRef(null);
 
   useEffect(() => {
     document.documentElement.className = theme;
@@ -83,21 +84,6 @@ export default function App() {
   const [sortOrder, setSortOrder] = useState('newest');   // 'newest' | 'oldest'
   const [isRecomputing, setIsRecomputing] = useState(false);
   const smartSearch = useSemanticSearch(searchQuery);
-
-  // Returns true once the backend answers OK; anything else keeps the "connecting" banner up.
-  const checkBackendHealth = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/health`);
-      if (res.ok) {
-        setIsWakingUp(false);
-        return true;
-      }
-    } catch (err) {
-      console.log("Backend server is warming up or unreachable", err);
-    }
-    setIsWakingUp(true);
-    return false;
-  };
 
   const fetchReels = async () => {
     try {
@@ -116,32 +102,65 @@ export default function App() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchReels();
     let cancelled = false;
-    let timer;
+    let retryTimer;
+    // Only show "connecting" if /health is slow or failing, so a quick answer never flashes the banner.
+    const slowTimer = setTimeout(() => setIsWakingUp(true), 1500);
     const waitForBackend = async () => {
-      if (!(await checkBackendHealth()) && !cancelled) timer = setTimeout(waitForBackend, 5000);
+      let ok = false;
+      try {
+        ok = (await fetch(`${API_BASE_URL}/health`)).ok;
+      } catch (err) {
+        console.log("Backend server is warming up or unreachable", err);
+      }
+      if (cancelled) return;
+      if (ok) {
+        clearTimeout(slowTimer);
+        setIsWakingUp(false);
+        return;
+      }
+      setIsWakingUp(true);
+      retryTimer = setTimeout(waitForBackend, 5000);
     };
     waitForBackend();
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      clearTimeout(slowTimer);
+      clearTimeout(retryTimer);
     };
   }, []);
 
-  // Keep a ref of the queued/processing reel ids, so the polling interval
-  // below can read the latest value without being torn down each change.
+  // Keep refs of the queued/processing reel ids and the newest reel's timestamp,
+  // so the polling interval below reads the latest values without being torn down each change.
   useEffect(() => {
     activeIdsRef.current = reels.filter(r => r.status === 'pending' || r.status === 'processing').map(r => r.id);
+    newestCreatedAtRef.current = reels.reduce((newest, r) =>
+      r.created_at && (!newest || new Date(r.created_at) > new Date(newest)) ? r.created_at : newest, null);
   }, [reels]);
 
-  // While any reel is queued/processing, re-fetch just those rows so they fill in once the worker finishes.
+  // Every 5s: pick up reels added elsewhere (e.g. shared from the phone) and re-fetch queued ones
+  // so they fill in once the worker finishes; a queued reel deleted elsewhere drops out.
   useEffect(() => {
     const id = setInterval(async () => {
+      if (!supabase) return;
       const ids = activeIdsRef.current.slice(-MAX_REFRESH_IDS);
-      if (!ids.length) return;
-      const { data, error } = await supabase.from('saved_reels').select(REEL_COLUMNS).in('id', ids);
-      if (error) return console.error("Error refreshing queued reels", error);
-      const fresh = new Map(data.map(r => [r.id, rowToRecord(r)]));
-      setReels(prev => prev.map(r => fresh.get(r.id) || r));
+      const newest = newestCreatedAtRef.current;
+      const table = () => supabase.from('saved_reels').select(REEL_COLUMNS);
+      const [queued, added] = await Promise.all([
+        ids.length ? table().in('id', ids) : { data: [] },
+        newest ? table().gt('created_at', newest) : { data: [] },
+      ]);
+      const error = queued.error || added.error;
+      if (error) return console.error("Error refreshing reels", error);
+      const fresh = new Map([...queued.data, ...added.data].map(r => [r.id, rowToRecord(r)]));
+      if (!fresh.size && !ids.length) return;
+      const requested = new Set(ids);
+      setReels(prev => {
+        const known = new Set(prev.map(r => r.id));
+        const kept = prev
+          .filter(r => !requested.has(r.id) || fresh.has(r.id))
+          .map(r => fresh.get(r.id) || r);
+        return [...[...fresh.values()].filter(r => !known.has(r.id)), ...kept];
+      });
     }, 5000);
     return () => clearInterval(id);
   }, []);

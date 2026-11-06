@@ -48,6 +48,16 @@ describe('rankReels', () => {
     expect(ids(rankReels(rich, 'zapier email', NONE))).toEqual(['both']);
   });
 
+  it('matches words from their start, so short words do not match inside others', () => {
+    const rich = [
+      reel('ai', 'AI tools'),
+      reel('email', 'Email tools'),
+      reel('cpp', 'Learning C++ basics'),
+    ];
+    expect(ids(rankReels(rich, 'ai tool', NONE))).toEqual(['ai']);
+    expect(ids(rankReels(rich, 'c++', NONE))).toEqual(['cpp']);
+  });
+
   it('counts transcript or caption hits from Supabase as word matches', () => {
     const result = rankReels(reels, 'heckler', new Map([['c', 0.5]]), new Set(['a', 'ghost']));
     expect(ids(result)).toEqual(['a', 'c']);

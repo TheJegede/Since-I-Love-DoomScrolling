@@ -82,12 +82,13 @@ def verify_api_key(x_api_key: Optional[str] = Header(None)):
 
 
 groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+# Instagram blocks HF's datacenter IPs: on the Space, reels are queued for the local worker instead of downloaded.
+IS_HF_SPACE = "SPACE_ID" in os.environ
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    is_hf_space = "SPACE_ID" in os.environ
-    if os.getenv("ENABLE_WORKER", "1") == "0" or is_hf_space:
-        if is_hf_space:
+    if os.getenv("ENABLE_WORKER", "1") == "0" or IS_HF_SPACE:
+        if IS_HF_SPACE:
             logger.info("Running on Hugging Face Space — auto-disabling queue worker to prevent datacenter IP blocks.")
         else:
             logger.info("ENABLE_WORKER=0 — queue worker disabled.")
@@ -596,6 +597,26 @@ CLUSTER_JOB = {
 }
 
 
+def _recluster_late_reels(items: List[dict], clusters: List[str]) -> None:
+    """Reels saved while the recompute ran copied a pre-recompute cluster name.
+    Give each the new cluster of its closest reel from this run (same 0.4 bar as
+    search_fields), computed locally so their own stale names can't match."""
+    if not items:
+        return
+    from sklearn.preprocessing import normalize
+    clustered = normalize([item["embedding"] for item in items])
+    seen = {item["id"] for item in items}
+    late = [r for r in db.reels_for_clustering() if r["id"] not in seen and r["embedding"] is not None]
+    ids_by_cluster = {}
+    for reel in late:
+        similarities = clustered @ normalize([reel["embedding"]])[0]
+        best = int(similarities.argmax())
+        cluster = clusters[best] if similarities[best] >= NEAREST_CLUSTER_MIN_SIMILARITY else None
+        ids_by_cluster.setdefault(cluster, []).append(reel["id"])
+    for cluster, reel_ids in ids_by_cluster.items():
+        db.set_cluster(reel_ids, cluster)
+
+
 def run_cluster_recompute_task():
     CLUSTER_JOB.update({
         "status": "running",
@@ -630,12 +651,14 @@ def run_cluster_recompute_task():
                               "takeaway": ej.get("key_takeaway", ""), "embedding": embedding})
 
         db.set_cluster(unextracted_ids, None)
+        assignments = cluster_topics_semantically(items)
         ids_by_cluster = {}
-        for assignment in cluster_topics_semantically(items):
+        for assignment in assignments:
             ids_by_cluster.setdefault(assignment["cluster"], []).append(assignment["id"])
         for cluster, reel_ids in ids_by_cluster.items():
             db.set_cluster(reel_ids, cluster)
         applied = sum(len(reel_ids) for reel_ids in ids_by_cluster.values())
+        _recluster_late_reels(items, [a["cluster"] for a in assignments])
 
         logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
         CLUSTER_JOB.update({
@@ -652,12 +675,17 @@ def run_cluster_recompute_task():
         })
 
 
+_CLUSTER_JOB_LOCK = threading.Lock()
+
+
 @app.post("/clusters/recompute", dependencies=[Depends(verify_api_key)])
 def recompute_clusters(background_tasks: BackgroundTasks):
     """Trigger cluster recomputation in the background."""
-    if CLUSTER_JOB["status"] == "running":
-        raise HTTPException(status_code=409, detail="Cluster recomputation is already in progress.")
-        
+    # Endpoints run in a threadpool: claim the job here, or two quick requests both start one.
+    with _CLUSTER_JOB_LOCK:
+        if CLUSTER_JOB["status"] == "running":
+            raise HTTPException(status_code=409, detail="Cluster recomputation is already in progress.")
+        CLUSTER_JOB["status"] = "running"
     background_tasks.add_task(run_cluster_recompute_task)
     return {"status": "started", "message": "Cluster recomputation started in the background."}
 
@@ -709,6 +737,10 @@ def process_reel_url(url: str) -> dict:
     if cached:
         logger.info(f"Returning cached record for URL: {clean_url}")
         return cached
+    if IS_HF_SPACE:
+        logger.info(f"Queued {clean_url} for the local worker.")
+        return db.insert_reel(url=clean_url, title=None, raw_transcript="", post_caption="",
+                              extracted_json={}, status="pending", source="dashboard")
 
     title, raw_transcript, post_caption, extracted = _run_pipeline(clean_url)
     # The Shortcut or worker may have saved this URL while the pipeline ran.

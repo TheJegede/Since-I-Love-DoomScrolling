@@ -315,6 +315,46 @@ def test_reels_for_clustering_parses_pgvector_text(monkeypatch):
     ]
 
 
+def test_recompute_reclusters_reels_saved_while_it_ran(monkeypatch):
+    pytest.importorskip("sklearn")
+    first = [{"id": "a", "extracted_json": {"core_topic": "Running"}, "embedding": [1.0, 0.0]},
+             {"id": "b", "extracted_json": {"core_topic": "Cooking"}, "embedding": [0.0, 1.0]}]
+    late = [{"id": "near-a", "extracted_json": {"core_topic": "Jogging"}, "embedding": [0.9, 0.1]},
+            {"id": "far", "extracted_json": {"core_topic": "Taxes"}, "embedding": [-1.0, -1.0]}]
+    reads = iter([first, first + late])  # the second read sees reels the worker saved meanwhile
+    applied = {}
+    monkeypatch.setattr(main.db, "reels_for_clustering", lambda: next(reads))
+    monkeypatch.setattr(main.db, "set_cluster", lambda reel_ids, cluster: applied.update(dict.fromkeys(reel_ids, cluster)))
+    monkeypatch.setattr(main, "cluster_topics_semantically", lambda items: [
+        {"id": "a", "cluster": "Fitness"}, {"id": "b", "cluster": "Food"}])
+
+    main.run_cluster_recompute_task()
+    assert main.CLUSTER_JOB["status"] == "done", main.CLUSTER_JOB
+    assert applied == {"a": "Fitness", "b": "Food", "near-a": "Fitness", "far": None}
+
+
+def test_recompute_is_claimed_before_the_job_starts(monkeypatch):
+    monkeypatch.setattr(main, "run_cluster_recompute_task", lambda: None)  # job never gets to run
+    monkeypatch.setitem(main.CLUSTER_JOB, "status", "idle")
+    assert client.post("/clusters/recompute").status_code == 200
+    assert client.post("/clusters/recompute").status_code == 409
+
+
+def test_hf_space_queues_urls_for_the_local_worker(monkeypatch):
+    saved = []
+    monkeypatch.setattr(main, "IS_HF_SPACE", True)
+    monkeypatch.setattr(main.db, "get_reel_by_url", lambda url: None)
+    monkeypatch.setattr(main.db, "insert_reel", lambda **row: saved.append(row) or {
+        "id": "q1", "url": row["url"], "extracted_json": {}, "status": row["status"]})
+    monkeypatch.setattr(main, "_run_pipeline", raiser(AssertionError("HF must not download reels")))
+
+    r = client.post("/extract/url", json={"url": "https://www.instagram.com/reel/HF1/?igsh=1"})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "pending"
+    assert saved[0]["url"] == "https://www.instagram.com/reel/HF1/"
+    assert saved[0]["source"] == "dashboard"
+
+
 def test_cluster_labels_are_balanced():
     """Well-separated groups must not collapse into one giant cluster plus singletons."""
     np = pytest.importorskip("numpy")
@@ -552,9 +592,11 @@ def test_parse_saved_posts():
         {"label_values": [
             {"label": "URL", "value": "https://www.instagram.com/p/BBB/"},
             {"label": "Caption", "value": "photo"}]},
+        {"label_values": [  # same reel saved to a second collection
+            {"label": "URL", "value": "https://www.instagram.com/reel/AAA/?igsh=xyz"}]},
     ]
     out = parse_saved_posts(sample)
-    assert len(out) == 1, out  # the /p/ photo post is dropped
+    assert len(out) == 1, out  # the /p/ photo post and the repeat are dropped
     assert out[0] == {"url": "https://www.instagram.com/reel/AAA/", "caption": "hello", "title": "T1"}
 
 
