@@ -266,6 +266,15 @@ textarea::placeholder {
   gap: 1rem;
 }
 
+.login-panel form {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.login-panel .field {
+  width: 100%;
+}
+
 .login-copy,
 .login-status {
   margin: 0;
