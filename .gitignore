@@ -29,3 +29,6 @@ backend/batch_progress.json
 skills-lock.json
 
 PRODUCT.md
+
+# Agent worktrees
+.claude/worktrees/
