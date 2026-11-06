@@ -1,7 +1,8 @@
 // In-memory stand-in for the supabase-js client. Queries run against plain arrays,
 // so tests assert on the rows the code actually wrote.
 export function createFakeSupabase({ getTable } = {}) {
-  const fake = { tables: {}, uploads: [], removed: [], log: [], failures: [], session: null };
+  // defaults[table]() plays the part of the column defaults Postgres fills in on insert.
+  const fake = { tables: {}, uploads: [], removed: [], log: [], failures: [], session: null, defaults: {} };
   const tableFor = (name) => getTable?.(name) ?? (fake.tables[name] ??= []);
 
   // The next `op` ('select' | 'insert' | 'update' | 'delete' | 'upload') on `table` fails with `error`.
@@ -25,7 +26,7 @@ export function createFakeSupabase({ getTable } = {}) {
       const matches = (r) => q.filters.every(f => f(r));
       let data;
       if (q.op === 'insert') {
-        data = [].concat(q.payload).map(r => ({ ...r }));
+        data = [].concat(q.payload).map(r => ({ ...fake.defaults[name]?.(), ...r }));
         rows.push(...data);
       } else if (q.op === 'update') {
         data = rows.filter(matches);

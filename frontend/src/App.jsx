@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import './App.css';
 import { supabase, rowToRecord, REEL_COLUMNS } from './supabaseClient';
-import { API_BASE_URL, fetchWithAuth } from './api';
+import { deleteReel, retryReel, requestClusterRecompute, latestClusterJob } from './queue';
+import { useWorkerStatus, isWorkerStale, timeSince } from './useWorkerStatus';
 import { Skeleton, TableSkeleton } from './components/Skeletons';
 import ReelModal from './components/ReelModal';
 import InsightsTable from './components/InsightsTable';
@@ -73,7 +74,6 @@ function Dashboard() {
   const [reels, setReels] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isFetching, setIsFetching] = useState(true);
-  const [isWakingUp, setIsWakingUp] = useState(false);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [theme, setTheme] = useState(() => localStorage.getItem('transcriber_theme') || 'dark');
@@ -93,8 +93,9 @@ function Dashboard() {
   const [clusterFilter, setClusterFilter] = useState('All');
   const [toolFilter, setToolFilter] = useState('All');
   const [sortOrder, setSortOrder] = useState('newest');   // 'newest' | 'oldest'
-  const [isRecomputing, setIsRecomputing] = useState(false);
+  const [clusterJob, setClusterJob] = useState(null);  // latest cluster_jobs row
   const smartSearch = useSemanticSearch(searchQuery);
+  const worker = useWorkerStatus();
 
   const fetchReels = async () => {
     try {
@@ -108,37 +109,29 @@ function Dashboard() {
     }
   };
 
-  // Fetch reels on mount; keep checking the backend every 5s until it answers (HF cold starts return 503s).
+  // Load the library, and any recompute already queued or running, on mount.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchReels();
-    let cancelled = false;
-    let retryTimer;
-    // Only show "connecting" if /health is slow or failing, so a quick answer never flashes the banner.
-    const slowTimer = setTimeout(() => setIsWakingUp(true), 1500);
-    const waitForBackend = async () => {
-      let ok = false;
-      try {
-        ok = (await fetch(`${API_BASE_URL}/health`)).ok;
-      } catch (err) {
-        console.log("Backend server is warming up or unreachable", err);
-      }
-      if (cancelled) return;
-      if (ok) {
-        clearTimeout(slowTimer);
-        setIsWakingUp(false);
-        return;
-      }
-      setIsWakingUp(true);
-      retryTimer = setTimeout(waitForBackend, 5000);
-    };
-    waitForBackend();
-    return () => {
-      cancelled = true;
-      clearTimeout(slowTimer);
-      clearTimeout(retryTimer);
-    };
+    latestClusterJob().then(setClusterJob, err => console.error("Error reading recompute status", err));
   }, []);
+
+  // While a recompute is queued or running, follow it; reload the library once it is done.
+  const clusterJobStatus = clusterJob?.status;
+  useEffect(() => {
+    if (clusterJobStatus !== 'pending' && clusterJobStatus !== 'running') return;
+    const id = setInterval(async () => {
+      try {
+        const job = await latestClusterJob();
+        setClusterJob(job);
+        if (job?.status === 'done') fetchReels();
+        if (job?.status === 'error') setError(`Recompute failed: ${job.error || 'unknown error'}`);
+      } catch (err) {
+        console.error("Error polling recompute status", err);
+      }
+    }, 3000);
+    return () => clearInterval(id);
+  }, [clusterJobStatus]);
 
   // Keep refs of the queued/processing reel ids and the newest reel's timestamp,
   // so the polling interval below reads the latest values without being torn down each change.
@@ -177,60 +170,20 @@ function Dashboard() {
   }, []);
 
   const handleRecompute = async () => {
-    setIsRecomputing(true);
     setError(null);
     try {
-      const res = await fetchWithAuth(`${API_BASE_URL}/clusters/recompute`, { method: 'POST' });
-      if (res.status === 409) {
-        // Already running, start polling
-        startRecomputePolling();
-        return;
-      }
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Recompute failed.');
-      }
-      
-      startRecomputePolling();
+      await requestClusterRecompute();
+      setClusterJob(await latestClusterJob());
     } catch (err) {
       setError(err.message);
-      setIsRecomputing(false);
     }
-  };
-
-  const startRecomputePolling = () => {
-    const poll = async () => {
-      try {
-        const res = await fetchWithAuth(`${API_BASE_URL}/clusters/recompute/status`);
-        if (!res.ok) return;
-        const job = await res.json();
-        if (job.status !== 'running') {
-          clearInterval(intervalId);
-          setIsRecomputing(false);
-          if (job.status === 'error') {
-            setError(job.error || 'Recompute failed in background.');
-          } else {
-            await fetchReels();
-          }
-        }
-      } catch (err) {
-        console.error("Error polling cluster recompute status", err);
-      }
-    };
-
-    const intervalId = setInterval(poll, 3000);
-    poll(); // run immediately
   };
 
   const handleDelete = async (id, e) => {
     if (e) e.stopPropagation();
     if (!window.confirm('Delete this reel? This cannot be undone.')) return;
     try {
-      const res = await fetchWithAuth(`${API_BASE_URL}/reels/${id}`, { method: 'DELETE' });
-      if (!res.ok && res.status !== 404) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Delete failed.');
-      }
+      await deleteReel(reels.find(r => r.id === id) || { id });
       setReels(prev => prev.filter(r => r.id !== id));
       if (selectedReel && selectedReel.id === id) setSelectedReel(null);
     } catch (err) {
@@ -243,11 +196,7 @@ function Dashboard() {
   const handleRetry = async (id, e) => {
     if (e) e.stopPropagation();
     try {
-      const res = await fetchWithAuth(API_BASE_URL + '/reels/' + id + '/retry', { method: 'POST' });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Retry failed.');
-      }
+      await retryReel(id);
       const updated = { status: 'pending', error: null };
       setReels(prev => prev.map(r => r.id === id ? { ...r, ...updated } : r));
       setSelectedReel(prev => prev && prev.id === id ? { ...prev, ...updated } : prev);
@@ -321,6 +270,9 @@ function Dashboard() {
   const paginatedReels = filteredReels.slice(startIndex, endIndex);
   const completedCount = reels.filter(r => !r.status || r.status === 'done').length;
   const activeCount = reels.filter(r => r.status && r.status !== 'done').length;
+  const isRecomputeActive = clusterJobStatus === 'pending' || clusterJobStatus === 'running';
+  const isQueueWaiting = isRecomputeActive || reels.some(r => r.status === 'pending' || r.status === 'processing');
+  const workerStale = worker.loaded && isWorkerStale(worker.lastSeen);
 
   return (
     <div className="app-shell">
@@ -335,10 +287,12 @@ function Dashboard() {
           </p>
         </div>
         <div className="header-meta">
-          <span className="system-status">
-            <span className={`status-dot${isWakingUp ? ' waking' : ''}`}>●</span>
-            {isWakingUp ? 'CONNECTING TO BACKEND' : 'BACKEND ONLINE'}
-          </span>
+          {worker.loaded && (
+            <span className="system-status">
+              <span className={`status-dot${workerStale ? ' waking' : ''}`}>●</span>
+              {worker.lastSeen ? `WORKER RAN ${timeSince(worker.lastSeen).toUpperCase()} AGO` : 'WORKER NOT SEEN YET'}
+            </span>
+          )}
           <button 
             className="theme-toggle-btn" 
             onClick={() => setTheme(prev => prev === 'light' ? 'dark' : 'light')}
@@ -432,21 +386,21 @@ function Dashboard() {
                 </select>
               </div>
 
-              {!isWakingUp && (
-                <button className="recompute-btn" onClick={handleRecompute} disabled={isRecomputing}>
-                  {isRecomputing ? 'Clustering...' : 'Recompute clusters'}
-                </button>
-              )}
+              <button className="recompute-btn" onClick={handleRecompute} disabled={isRecomputeActive}>
+                {clusterJobStatus === 'pending' ? 'Queued…' : clusterJobStatus === 'running' ? 'Clustering…' : 'Recompute clusters'}
+              </button>
             </>
           )}
         </aside>
 
         <main className="workspace-main">
-          {isWakingUp && (
-            <div className="wake-alert">
+          {workerStale && isQueueWaiting && (
+            <div className="wake-alert" role="status">
               <div className="wake-pulse"></div>
               <div>
-                <strong>Connecting to local extraction server...</strong> Ingestion and cluster recomputation require the backend to be running locally.
+                {worker.lastSeen
+                  ? `Your PC worker last ran ${timeSince(worker.lastSeen)} ago — queued items will be processed when it runs again.`
+                  : "Your PC worker hasn't checked in yet — queued items will be processed once it runs."}
               </div>
             </div>
           )}
@@ -461,7 +415,7 @@ function Dashboard() {
             </div>
           )}
 
-          <IngestionPanel onIngested={handleIngested} onError={setError} onBatchFinished={fetchReels} />
+          <IngestionPanel reels={reels} onIngested={handleIngested} onError={setError} onBatchQueued={fetchReels} />
 
           <section className="insights-section">
             <div className="dashboard-controls">

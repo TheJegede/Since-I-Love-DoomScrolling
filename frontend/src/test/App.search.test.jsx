@@ -39,11 +39,6 @@ async function searchFor(text) {
 
 beforeEach(() => {
   useSemanticSearch.mockReset().mockReturnValue(smart());
-  globalThis.fetch = vi.fn((input) => {
-    const u = String(input);
-    if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-  });
 });
 
 describe('App search', () => {
