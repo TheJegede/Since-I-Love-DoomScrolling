@@ -53,4 +53,4 @@ if (-not (Test-Path $CookiesFile)) {
 
 # 7. Start FastAPI server
 Write-Host "Starting FastAPI server on http://localhost:8000..." -ForegroundColor Green
-& uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+& uvicorn main:app --host 127.0.0.1 --port 8000 --reload

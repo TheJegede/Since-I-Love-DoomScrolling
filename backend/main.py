@@ -361,32 +361,15 @@ def _name_semantic_clusters(items: List[dict], labels: List[int]) -> dict:
 
 
 def cluster_topics_semantically(items: List[dict]) -> List[dict]:
-    """Embed topics locally, cluster them mathematically, then name them once.
+    """Cluster reels by their stored search embeddings, then name the clusters once.
 
-    items: list of {"id": str, "topic": str, "takeaway": str}.
-    Returns list of {"id": str, "cluster": str}. The embedding model is cached
-    in-process, so subsequent recomputes avoid model initialization.
+    items: list of {"id": str, "topic": str, "takeaway": str, "embedding": list}.
+    Returns list of {"id": str, "cluster": str}.
     """
     if not items:
         return []
 
-    texts = []
-    for item in items:
-        topic = str(item.get("topic") or "").strip()
-        takeaway = str(item.get("takeaway") or "").strip()
-        texts.append(" ".join(part for part in (topic, takeaway) if part) or "Uncategorized content")
-
-    try:
-        embeddings = list(_get_embedding_model().embed(texts))
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Embedding generation failed: {e}") from e
-
-    if len(embeddings) != len(items):
-        raise HTTPException(status_code=500, detail="Embedding model returned an incomplete result.")
-
-    labels = _semantic_cluster_labels(embeddings)
+    labels = _semantic_cluster_labels([item["embedding"] for item in items])
     names = _name_semantic_clusters(items, labels)
     return [
         {"id": item["id"], "cluster": names[str(label)]}
@@ -645,18 +628,18 @@ def run_cluster_recompute_task():
         items = []
         unextracted_ids = []  # queued or failed reels: nothing to cluster on
         for r in rows:
-            ej = r.get("extracted_json")
-            if isinstance(ej, str):
-                try:
-                    ej = json.loads(ej)
-                except Exception:
-                    ej = {}
-            topic = (ej or {}).get("core_topic", "")
-            takeaway = (ej or {}).get("key_takeaway", "")
-            if topic or takeaway:
-                items.append({"id": r["id"], "topic": topic, "takeaway": takeaway})
-            else:
+            ej = r["extracted_json"]
+            embedding = r["embedding"]
+            if embedding is None:
+                # Not embedded yet (e.g. saved while the model was unavailable): repair it now.
+                embedding = embed_reel(ej)
+                if embedding is not None:
+                    db.set_embedding(r["id"], embedding)
+            if embedding is None:
                 unextracted_ids.append(r["id"])
+            else:
+                items.append({"id": r["id"], "topic": ej.get("core_topic", ""),
+                              "takeaway": ej.get("key_takeaway", ""), "embedding": embedding})
 
         db.set_cluster(unextracted_ids, None)
         ids_by_cluster = {}
@@ -1046,20 +1029,21 @@ def extract_batch(file: UploadFile = File(...)):
     db.insert_pending_reels(new_reels, source="batch")
     enqueued_count = len(new_reels)
 
-    # Initialize batch tracking state
+    # Initialize batch tracking state; counts come from the rows' real statuses.
     BATCH_JOB.update({
-        "status": "running" if enqueued_count > 0 else "done",
+        "status": "running",
         "total": len(urls),
         "urls": urls,
-        "done": len(existing_urls),
-        "ok": len(existing_urls),
+        "done": 0,
+        "ok": 0,
         "failed": 0,
         "current": "",
         "errors": [],
         "started_at": datetime.now(timezone.utc).isoformat(),
-        "finished_at": datetime.now(timezone.utc).isoformat() if enqueued_count == 0 else None,
+        "finished_at": None,
     })
-    
+    update_batch_job_status()
+
     return {
         "started": enqueued_count > 0,
         "total": len(urls),

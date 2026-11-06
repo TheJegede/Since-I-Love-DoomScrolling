@@ -142,7 +142,14 @@ def get_reel_details(reel_id: str) -> Optional[dict]:
 
 
 def reels_for_clustering() -> list:
-    return _select_newest_first("id, extracted_json")
+    """Every row as {id, extracted_json, embedding}, with embedding as a list of floats or None."""
+    rows = []
+    for r in _select_newest_first("id, extracted_json, embedding"):
+        embedding = r.get("embedding")
+        if isinstance(embedding, str):  # PostgREST returns pgvector as text: "[0.1,0.2,...]"
+            embedding = json.loads(embedding)
+        rows.append({"id": r["id"], "extracted_json": row_to_record(r)["extracted_json"], "embedding": embedding})
+    return rows
 
 
 def reels_missing_embedding() -> list:

@@ -88,6 +88,18 @@ describe('App baseline', () => {
     });
   });
 
+  it('fetchWithAuth forgets a wrong key and says so', async () => {
+    const { fetchWithAuth } = await import('../api');
+    vi.spyOn(window, 'prompt').mockReturnValue('wrong_key');
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem');
+    globalThis.fetch = vi.fn(() => Promise.resolve({ status: 401 }));
+
+    await expect(fetchWithAuth('/clusters/recompute', { method: 'POST' })).rejects.toThrow(/Wrong API key/);
+    expect(setItemSpy).not.toHaveBeenCalledWith('transcriber_api_key', 'wrong_key');
+    expect(removeItemSpy).toHaveBeenCalledWith('transcriber_api_key');
+  });
+
   it('shows the queue banner when the submitted URL is already queued', async () => {
     globalThis.fetch = vi.fn((input) => {
       const u = String(input);

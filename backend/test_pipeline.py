@@ -268,18 +268,22 @@ def test_reels_include_cluster(monkeypatch):
     assert "cluster" in r.json()[0]
 
 
-def test_recompute_clusters(monkeypatch):
+def test_recompute_clusters(monkeypatch, embedding_model):
     rows = [
-        {"id": "a", "extracted_json": {"core_topic": "AI email tools"}},
-        {"id": "b", "extracted_json": {"core_topic": "Marathon training"}},
-        {"id": "c", "extracted_json": {}},  # queued/failed reel: nothing to cluster
+        {"id": "a", "extracted_json": {"core_topic": "AI email tools"}, "embedding": [0.1] * 384},
+        {"id": "b", "extracted_json": {"core_topic": "Marathon training"}, "embedding": None},  # never embedded
+        {"id": "c", "extracted_json": {}, "embedding": None},  # queued/failed reel: nothing to cluster
     ]
-    applied = []
+    applied, stored, clustered = [], [], []
     monkeypatch.setattr(main.db, "reels_for_clustering", lambda: rows)
+    monkeypatch.setattr(main.db, "set_embedding", lambda reel_id, embedding: stored.append(reel_id))
     monkeypatch.setattr(main.db, "set_cluster",
                         lambda reel_ids, cluster: applied.extend((rid, cluster) for rid in reel_ids))
-    monkeypatch.setattr(main, "cluster_topics_semantically", lambda items: [
-        {"id": "a", "cluster": "Productivity"}, {"id": "b", "cluster": "Fitness"}])
+
+    def fake_cluster(items):
+        clustered.extend(items)
+        return [{"id": "a", "cluster": "Productivity"}, {"id": "b", "cluster": "Fitness"}]
+    monkeypatch.setattr(main, "cluster_topics_semantically", fake_cluster)
 
     r = client.post("/clusters/recompute")
     assert r.status_code == 200, r.text
@@ -290,6 +294,18 @@ def test_recompute_clusters(monkeypatch):
     assert job["assigned"] == 2, job
     assert ("a", "Productivity") in applied
     assert ("c", None) in applied, "unextracted reel should be reset to Unclustered"
+    assert [item["embedding"] for item in clustered] == [[0.1] * 384, FAKE_VECTOR], "stored vectors are reused"
+    assert stored == ["b"], "a reel missing its embedding is repaired, not skipped"
+
+
+def test_reels_for_clustering_parses_pgvector_text(monkeypatch):
+    table = RecordingTable([{"id": "a", "extracted_json": '{"core_topic": "x"}', "embedding": "[0.5,0.25]"},
+                            {"id": "b", "extracted_json": {}, "embedding": None}])
+    monkeypatch.setattr(db, "get_client", fake_client(table))
+    assert db.reels_for_clustering() == [
+        {"id": "a", "extracted_json": {"core_topic": "x"}, "embedding": [0.5, 0.25]},
+        {"id": "b", "extracted_json": {}, "embedding": None},
+    ]
 
 
 def test_cluster_labels_are_balanced():
@@ -571,6 +587,17 @@ def test_extract_batch(monkeypatch, batch_job):
     table.data.append({"url": "https://www.instagram.com/reel/AAA/", "status": "done"})  # worker finishes AAA
     status = client.get("/extract/batch/status").json()
     assert (status["status"], status["done"], status["ok"]) == ("done", 2, 2)
+
+
+def test_reimport_reports_real_statuses(monkeypatch, batch_job):
+    table = FakeTable([{"url": "https://www.instagram.com/reel/AAA/", "status": "failed", "error": "boom"}])
+    monkeypatch.setattr(main.db, "get_client", fake_client(table))
+    upload = b'[{"label_values": [{"label": "URL", "value": "https://www.instagram.com/reel/AAA/"}]}]'
+    files = {"file": ("saved_posts.json", io.BytesIO(upload), "application/json")}
+
+    r = client.post("/extract/batch", files=files)
+    assert r.json()["enqueued"] == 0
+    assert (batch_job["status"], batch_job["ok"], batch_job["failed"]) == ("done", 0, 1)
 
 
 @pytest.mark.parametrize("status", ["cookies_expired", "unsupported_format", "mystery"])

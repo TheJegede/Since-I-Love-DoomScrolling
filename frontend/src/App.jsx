@@ -22,6 +22,9 @@ import {
 } from 'lucide-react';
 
 const ITEMS_PER_PAGE = 25;
+const REEL_COLUMNS = 'id, url, title, extracted_json, created_at, cluster, status, error';
+// shortcut: refreshes only the oldest 100 queued reels per tick (the worker claims oldest first); fine at ~1 reel/min.
+const MAX_REFRESH_IDS = 100;
 
 // Supabase caps rows per request, so page through until the whole library is loaded.
 async function fetchAllReelRows() {
@@ -29,7 +32,7 @@ async function fetchAllReelRows() {
   for (;;) {
     const { data, error, count } = await supabase
       .from('saved_reels')
-      .select('id, url, title, extracted_json, created_at, cluster, status, error', { count: 'exact' })
+      .select(REEL_COLUMNS, { count: 'exact' })
       .order('created_at', { ascending: false })
       .order('id')
       .range(rows.length, rows.length + 999);
@@ -59,11 +62,11 @@ export default function App() {
   const [reels, setReels] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isFetching, setIsFetching] = useState(true);
-  const [isWakingUp, setIsWakingUp] = useState(false);
+  const [isWakingUp, setIsWakingUp] = useState(true);
   const [error, setError] = useState(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [theme, setTheme] = useState(() => localStorage.getItem('transcriber_theme') || 'dark');
-  const anyPendingRef = useRef(false);
+  const activeIdsRef = useRef([]);
 
   useEffect(() => {
     document.documentElement.className = theme;
@@ -81,17 +84,19 @@ export default function App() {
   const [isRecomputing, setIsRecomputing] = useState(false);
   const smartSearch = useSemanticSearch(searchQuery);
 
+  // Returns true once the backend answers OK; anything else keeps the "connecting" banner up.
   const checkBackendHealth = async () => {
     try {
-      setIsWakingUp(true);
       const res = await fetch(`${API_BASE_URL}/health`);
       if (res.ok) {
         setIsWakingUp(false);
+        return true;
       }
     } catch (err) {
       console.log("Backend server is warming up or unreachable", err);
-      // Keep waking up state active as a warning
     }
+    setIsWakingUp(true);
+    return false;
   };
 
   const fetchReels = async () => {
@@ -114,24 +119,38 @@ export default function App() {
     }
   };
 
-  // Fetch reels from Supabase on mount
+  // Fetch reels on mount; keep checking the backend every 5s until it answers (HF cold starts return 503s).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchReels();
-    checkBackendHealth();
+    let cancelled = false;
+    let timer;
+    const waitForBackend = async () => {
+      if (!(await checkBackendHealth()) && !cancelled) timer = setTimeout(waitForBackend, 5000);
+    };
+    waitForBackend();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, []);
 
-  // Keep a ref of whether any reel is still queued/processing, so the polling
-  // interval below can read the latest value without being torn down each change.
+  // Keep a ref of the queued/processing reel ids, so the polling interval
+  // below can read the latest value without being torn down each change.
   useEffect(() => {
-    anyPendingRef.current = reels.some(r => r.status === 'pending' || r.status === 'processing');
+    activeIdsRef.current = reels.filter(r => r.status === 'pending' || r.status === 'processing').map(r => r.id);
   }, [reels]);
 
-  // While any reel is queued/processing, poll so it fills in once the worker finishes.
-  // A single stable interval reads the latest pending state from a ref each tick.
+  // While any reel is queued/processing, re-fetch just those rows so they fill in once the worker finishes.
   useEffect(() => {
-    const id = setInterval(() => {
-      if (anyPendingRef.current) fetchReels();
+    const id = setInterval(async () => {
+      const ids = activeIdsRef.current.slice(-MAX_REFRESH_IDS);
+      if (!ids.length) return;
+      if (!supabase) return fetchReels();
+      const { data, error } = await supabase.from('saved_reels').select(REEL_COLUMNS).in('id', ids);
+      if (error) return console.error("Error refreshing queued reels", error);
+      const fresh = new Map(data.map(r => [r.id, rowToRecord(r)]));
+      setReels(prev => prev.map(r => fresh.get(r.id) || r));
     }, 5000);
     return () => clearInterval(id);
   }, []);

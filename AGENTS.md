@@ -72,7 +72,7 @@ Cluster/tool/date filters and exact-word search run **in-memory**; meaning match
 backend/run_local.ps1
 
 # Manual run (venv already active, from backend/)
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn main:app --host 127.0.0.1 --port 8000 --reload
 
 # Standalone local worker (drains the Supabase queue; no FastAPI server needed)
 python backend/run_worker.py
