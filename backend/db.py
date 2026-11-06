@@ -13,6 +13,7 @@ from typing import Optional
 from supabase import create_client, Client
 
 TABLE = "saved_reels"
+AUDIO_BUCKET = "audio-uploads"  # private Storage bucket for dashboard audio uploads
 FAILURE_STATUSES = frozenset({"failed", "cookies_expired", "unsupported_format"})
 _client: Optional[Client] = None
 
@@ -167,6 +168,14 @@ def nearest_cluster(embedding: list, min_similarity: float) -> Optional[str]:
 def set_cluster(reel_ids: list, cluster: Optional[str]) -> None:
     for chunk in _chunked(reel_ids, 100):
         get_client().table(TABLE).update({"cluster": cluster}).in_("id", chunk).execute()
+
+
+def download_audio(path: str) -> bytes:
+    return get_client().storage.from_(AUDIO_BUCKET).download(path)
+
+
+def delete_audio(path: str) -> None:
+    get_client().storage.from_(AUDIO_BUCKET).remove([path])
 
 
 def delete_reel(reel_id: str) -> bool:

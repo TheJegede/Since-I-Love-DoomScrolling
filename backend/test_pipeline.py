@@ -760,6 +760,93 @@ def test_embedding_queue_helpers(monkeypatch):
     assert ("eq", ("id", "a")) in table.filters
 
 
+# ---------------------------------------------------------------- worker: text and audio rows
+
+@pytest.fixture
+def worker_events(monkeypatch):
+    """Record what the worker writes; any unexpected write shows up in the list."""
+    events = []
+    monkeypatch.setattr(main.db, "update_reel_result", lambda **kwargs: events.append(("done", kwargs)))
+    monkeypatch.setattr(main.db, "mark_failed", lambda *args, **kwargs: events.append(("failed", args)))
+    monkeypatch.setattr(main.db, "schedule_retry", lambda reel_id, error, when: events.append(("retry", reel_id)))
+    monkeypatch.setattr(main.db, "delete_audio", lambda path: events.append(("deleted", path)), raising=False)
+    return events
+
+
+def queue_row(monkeypatch, **row):
+    monkeypatch.setattr(main.db, "claim_next_pending",
+                        lambda: {"url": None, "audio_path": None, "raw_transcript": "", "post_caption": None,
+                                 "title": None, "attempt_count": 1, **row})
+
+
+def test_worker_processes_text_row(monkeypatch, pipeline, worker_events):
+    seen = []
+    monkeypatch.setattr(main, "extract_structured_json", lambda t, c: seen.append((t, c)) or EXTRACTION)
+    monkeypatch.setattr(main, "download_and_extract_audio", raiser(AssertionError("text rows are not downloaded")))
+    queue_row(monkeypatch, id="t1", title="Notes", raw_transcript=LONG_TRANSCRIPT, post_caption="cap")
+
+    assert main.worker_tick() is True
+    assert seen == [(LONG_TRANSCRIPT, "cap")]
+    [(kind, saved)] = worker_events
+    assert kind == "done"
+    assert (saved["reel_id"], saved["title"], saved["raw_transcript"]) == ("t1", "Notes", LONG_TRANSCRIPT)
+
+
+def test_worker_processes_audio_row_and_deletes_file(monkeypatch, pipeline, worker_events):
+    transcribed = {}
+
+    def fake_transcribe(path):
+        transcribed["path"] = path
+        with open(path, "rb") as f:
+            transcribed["bytes"] = f.read()
+        return LONG_TRANSCRIPT
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
+    queue_row(monkeypatch, id="a1", title="Voice memo", audio_path="a1.m4a", post_caption="cap")
+
+    assert main.worker_tick() is True
+    assert transcribed["path"].endswith(".m4a") and transcribed["bytes"] == b"audio"
+    assert not os.path.exists(transcribed["path"])
+    assert [kind for kind, _ in worker_events] == ["done", "deleted"]
+    assert worker_events[0][1]["raw_transcript"] == LONG_TRANSCRIPT
+    assert worker_events[0][1]["title"] == "Voice memo"
+    assert worker_events[1][1] == "a1.m4a"
+
+
+def test_audio_row_keeps_file_when_transcription_fails(monkeypatch, pipeline, worker_events):
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main, "transcribe_audio", raiser(HTTPException(status_code=500, detail="x")))
+    queue_row(monkeypatch, id="a1", audio_path="a1.m4a")
+
+    assert main.worker_tick() is True
+    assert worker_events == [("retry", "a1")]
+
+
+def test_audio_row_without_speech_or_caption_fails(monkeypatch, pipeline, worker_events):
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main, "transcribe_audio", lambda path: "")
+    queue_row(monkeypatch, id="a1", audio_path="a1.m4a", post_caption=None)
+
+    assert main.worker_tick() is True
+    [(kind, args)] = worker_events
+    assert kind == "failed" and args[0] == "a1" and "No spoken audio" in args[1]
+
+
+def test_row_with_nothing_to_process_fails(monkeypatch, worker_events):
+    queue_row(monkeypatch, id="n1")
+    assert main.worker_tick() is True
+    assert worker_events == [("failed", ("n1", "Nothing to process: no URL, audio or text."))]
+
+
+def test_done_reel_survives_audio_cleanup_failure(monkeypatch, pipeline, worker_events):
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main.db, "delete_audio", raiser(RuntimeError("storage down")), raising=False)
+    queue_row(monkeypatch, id="a1", audio_path="a1.mp3")
+
+    assert main.worker_tick() is True
+    assert [kind for kind, _ in worker_events] == ["done"]
+
+
 # ---------------------------------------------------------------- backup export
 
 def test_export_writes_every_row(monkeypatch, tmp_path):

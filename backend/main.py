@@ -707,23 +707,49 @@ def _run_pipeline(url: str, allow_caption_fallback: bool = True) -> tuple[str, s
     mp3_path = None
     try:
         mp3_path, post_caption, title = download_and_extract_audio(url)
-        raw_transcript = ""
-        try:
-            raw_transcript = transcribe_audio(mp3_path)
-        except Exception as e:
-            if not allow_caption_fallback:
-                raise
-            logger.warning(f"Transcription failed: {str(e)}. Proceeding using metadata/caption only.")
-        guard_silent_hook(raw_transcript, post_caption)
-        extracted = extract_structured_json(raw_transcript, post_caption)
+        raw_transcript, extracted = _transcribe_and_extract(mp3_path, post_caption, allow_caption_fallback)
         return title, raw_transcript, post_caption, extracted
     finally:
-        if mp3_path and os.path.exists(mp3_path):
-            try:
-                os.remove(mp3_path)
-                logger.info(f"Cleaned up temporary audio file: {mp3_path}")
-            except Exception as ce:
-                logger.warning(f"Could not delete temp file {mp3_path}: {str(ce)}")
+        _remove_temp_file(mp3_path)
+
+
+def _remove_temp_file(path: Optional[str]) -> None:
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+            logger.info(f"Cleaned up temporary audio file: {path}")
+        except Exception as ce:
+            logger.warning(f"Could not delete temp file {path}: {str(ce)}")
+
+
+def _transcribe_and_extract(audio_file: str, caption: Optional[str],
+                            allow_caption_fallback: bool) -> tuple[str, ReelExtraction]:
+    """Transcribe → silent-hook guard → LLM extract. Returns (raw_transcript, extracted).
+
+    A failed transcription falls back to the caption alone unless
+    allow_caption_fallback is False, in which case it raises."""
+    raw_transcript = ""
+    try:
+        raw_transcript = transcribe_audio(audio_file)
+    except Exception as e:
+        if not allow_caption_fallback:
+            raise
+        logger.warning(f"Transcription failed: {str(e)}. Proceeding using metadata/caption only.")
+    guard_silent_hook(raw_transcript, caption)
+    return raw_transcript, extract_structured_json(raw_transcript, caption or "")
+
+
+def _extract_from_audio_row(row: dict, allow_caption_fallback: bool) -> tuple[str, ReelExtraction]:
+    """Fetch a dashboard upload from Storage into a temp file, then transcribe and extract it."""
+    suffix = os.path.splitext(row["audio_path"])[1] or ".mp3"
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        temp.write(db.download_audio(row["audio_path"]))
+        temp.close()
+        return _transcribe_and_extract(temp.name, row.get("post_caption"), allow_caption_fallback)
+    finally:
+        temp.close()
+        _remove_temp_file(temp.name)
 
 
 def process_reel_url(url: str) -> dict:
@@ -774,22 +800,36 @@ def extract_url(payload: dict):
 def process_pending_reel(row: dict) -> None:
     """Run the pipeline for one claimed queue row and UPDATE it in place.
 
-    Unlike process_reel_url, this never inserts — the row already exists as
-    'processing'. Download failures (e.g. IG 403) mark the row 'failed' so it
-    can be retried later by resetting its status to 'pending'."""
+    The row says what to do: a URL is downloaded (Shortcut, pasted URL, bulk
+    import), an audio_path is fetched from Storage (dashboard upload), and
+    otherwise its pasted transcript/caption is extracted directly. Failures
+    are retried with backoff or marked with a failure status the dashboard
+    can retry."""
     reel_id = row["id"]
-    url = row["url"]
-    clean_url = normalize_instagram_url(url)
-    if not is_valid_instagram_reel(clean_url):
-        logger.warning(f"Worker rejected reel {reel_id}: Invalid URL format ({url})")
-        db.mark_failed(reel_id, f"Invalid Instagram Reel URL format: {url}")
-        return
+    url = row.get("url")
+    audio_path = row.get("audio_path")
     try:
         # A failed transcription is retried like any transient error; only the
         # last attempt settles for a caption-only extraction.
         is_final_attempt = int(row.get("attempt_count") or 0) >= MAX_WORKER_ATTEMPTS
-        title, raw_transcript, post_caption, extracted = _run_pipeline(
-            clean_url, allow_caption_fallback=is_final_attempt)
+        if url:
+            clean_url = normalize_instagram_url(url)
+            if not is_valid_instagram_reel(clean_url):
+                logger.warning(f"Worker rejected reel {reel_id}: Invalid URL format ({url})")
+                db.mark_failed(reel_id, f"Invalid Instagram Reel URL format: {url}")
+                return
+            title, raw_transcript, post_caption, extracted = _run_pipeline(
+                clean_url, allow_caption_fallback=is_final_attempt)
+        elif audio_path:
+            title, post_caption = row.get("title"), row.get("post_caption")
+            raw_transcript, extracted = _extract_from_audio_row(row, is_final_attempt)
+        elif (row.get("raw_transcript") or "").strip() or (row.get("post_caption") or "").strip():
+            title = row.get("title")
+            raw_transcript, post_caption = row.get("raw_transcript") or "", row.get("post_caption") or ""
+            extracted = extract_structured_json(raw_transcript, post_caption)
+        else:
+            db.mark_failed(reel_id, "Nothing to process: no URL, audio or text.")
+            return
         extracted_json = extracted.model_dump()
         db.update_reel_result(
             reel_id=reel_id,
@@ -799,7 +839,12 @@ def process_pending_reel(row: dict) -> None:
             extracted_json=extracted_json,
             **search_fields(extracted_json),
         )
-        logger.info(f"Worker processed reel {reel_id} ({url})")
+        logger.info(f"Worker processed reel {reel_id} ({url or audio_path or 'pasted text'})")
+        if audio_path:
+            try:
+                db.delete_audio(audio_path)
+            except Exception as e:  # the reel is saved; a leftover file only costs Storage space
+                logger.warning(f"Could not delete uploaded audio {audio_path}: {e}")
     except HTTPException as e:
         logger.warning(f"Worker failed reel {reel_id}: {e.detail}")
         if is_retryable_worker_error(e) and _schedule_worker_retry(row, e.detail):
