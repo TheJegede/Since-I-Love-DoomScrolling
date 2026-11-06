@@ -841,6 +841,13 @@ def test_audio_row_without_speech_or_caption_fails(monkeypatch, pipeline, worker
     assert kind == "failed" and args[0] == "a1" and "No spoken audio" in args[1]
 
 
+def test_url_row_never_deletes_stored_audio(monkeypatch, pipeline, worker_events):
+    """An audio_path on a URL row (e.g. inserted with the public key) must not delete an owner's upload."""
+    queue_row(monkeypatch, id="u1", url=REEL_URL, audio_path="owners-upload.m4a")
+    assert main.worker_tick() is True
+    assert [kind for kind, _ in worker_events] == ["done"]
+
+
 def test_row_with_nothing_to_process_fails(monkeypatch, worker_events):
     queue_row(monkeypatch, id="n1")
     assert main.worker_tick() is True

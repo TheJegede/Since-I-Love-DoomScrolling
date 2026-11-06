@@ -169,6 +169,12 @@ function Dashboard() {
     return () => clearInterval(id);
   }, []);
 
+  // 'local' signs out this browser only; the default would also sign out the owner's other devices.
+  const handleSignOut = async () => {
+    const { error: signOutError } = await supabase.auth.signOut({ scope: 'local' });
+    if (signOutError) setError(`Could not sign out: ${signOutError.message}`);
+  };
+
   const handleRecompute = async () => {
     setError(null);
     try {
@@ -302,7 +308,7 @@ function Dashboard() {
             <span>{theme === 'light' ? 'Dark' : 'Light'}</span>
           </button>
           {supabase && (
-            <button className="theme-toggle-btn" onClick={() => supabase.auth.signOut()}>
+            <button className="theme-toggle-btn" onClick={handleSignOut}>
               <LogOut size={15} />
               <span>Sign out</span>
             </button>

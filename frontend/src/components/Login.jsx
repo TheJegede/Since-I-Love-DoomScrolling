@@ -2,10 +2,20 @@ import { useState } from 'react';
 import { Clapperboard } from 'lucide-react';
 import { supabase } from '../supabaseClient';
 
+// A failed sign-in link (expired, already used) lands here with the reason in the URL;
+// supabase-js leaves it there, so show it instead of a silent login screen.
+const linkError = () => {
+  const params = new URLSearchParams(window.location.hash.slice(1) || window.location.search);
+  return params.get('error_description');
+};
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [status, setStatus] = useState('idle');  // 'idle' | 'sending' | 'sent'
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(() => {
+    const reason = linkError();
+    return reason && `That sign-in link didn't work: ${reason}. Request a new one below.`;
+  });
 
   const handleSubmit = async (e) => {
     e.preventDefault();

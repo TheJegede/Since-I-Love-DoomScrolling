@@ -85,6 +85,8 @@ export function createFakeSupabase({ getTable } = {}) {
           return { data: { path }, error: null };
         },
         remove: async (paths) => {
+          const error = takeFailure(bucket, 'remove');
+          if (error) return { data: null, error };
           fake.removed.push(...paths.map(path => ({ bucket, path })));
           return { data: [], error: null };
         },
@@ -100,7 +102,10 @@ export function createFakeSupabase({ getTable } = {}) {
         fake.log.push({ table: 'auth', method: 'signInWithOtp', args: [args] });
         return { data: {}, error: takeFailure('auth', 'signInWithOtp') };
       },
-      signOut: async () => {
+      signOut: async (args) => {
+        fake.log.push({ table: 'auth', method: 'signOut', args: [args] });
+        const error = takeFailure('auth', 'signOut');
+        if (error) return { error };  // supabase-js keeps the session when sign-out fails
         fake.setSession(null);
         return { error: null };
       },

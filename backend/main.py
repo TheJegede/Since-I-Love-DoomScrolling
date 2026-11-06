@@ -817,6 +817,7 @@ def process_pending_reel(row: dict) -> None:
     reel_id = row["id"]
     url = row.get("url")
     audio_path = row.get("audio_path")
+    uploaded_audio = None  # set only when this row's audio was what got processed
     try:
         # A failed transcription is retried like any transient error; only the
         # last attempt settles for a caption-only extraction.
@@ -832,6 +833,7 @@ def process_pending_reel(row: dict) -> None:
         elif audio_path:
             title, post_caption = row.get("title"), row.get("post_caption")
             raw_transcript, extracted = _extract_from_audio_row(row, is_final_attempt)
+            uploaded_audio = audio_path
         elif (row.get("raw_transcript") or "").strip() or (row.get("post_caption") or "").strip():
             title = row.get("title")
             raw_transcript, post_caption = row.get("raw_transcript") or "", row.get("post_caption") or ""
@@ -849,11 +851,11 @@ def process_pending_reel(row: dict) -> None:
             **search_fields(extracted_json),
         )
         logger.info(f"Worker processed reel {reel_id} ({url or audio_path or 'pasted text'})")
-        if audio_path:
+        if uploaded_audio:
             try:
-                db.delete_audio(audio_path)
+                db.delete_audio(uploaded_audio)
             except Exception as e:  # the reel is saved; a leftover file only costs Storage space
-                logger.warning(f"Could not delete uploaded audio {audio_path}: {e}")
+                logger.warning(f"Could not delete uploaded audio {uploaded_audio}: {e}")
     except HTTPException as e:
         logger.warning(f"Worker failed reel {reel_id}: {e.detail}")
         if is_retryable_worker_error(e) and _schedule_worker_retry(row, e.detail):

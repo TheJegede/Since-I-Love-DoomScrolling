@@ -43,11 +43,31 @@ describe('sign-in gate', () => {
     expect(await screen.findByLabelText('Email')).toBeInTheDocument();
   });
 
-  it('signs out from the header', async () => {
+  it('signs out of this device only', async () => {
     fake.session = OWNER;
     render(<App />);
     fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
     expect(await screen.findByLabelText('Email')).toBeInTheDocument();
+    const [{ args: [options] }] = fake.log.filter(c => c.method === 'signOut');
+    expect(options).toEqual({ scope: 'local' });  // the default ('global') would sign the phone out too
+  });
+
+  it('says so when signing out fails', async () => {
+    fake.session = OWNER;
+    fake.failNext('auth', 'signOut', { message: 'Failed to fetch' });
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Sign out' }));
+    expect(await screen.findByText('Could not sign out: Failed to fetch')).toBeInTheDocument();
+  });
+
+  it('explains an expired or already-used sign-in link', async () => {
+    window.history.replaceState(null, '', '/#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
+    try {
+      render(<App />);
+      expect(await screen.findByRole('alert')).toHaveTextContent('Email link is invalid or has expired');
+    } finally {
+      window.history.replaceState(null, '', '/');
+    }
   });
 
   it('requests a link without creating users', async () => {

@@ -45,7 +45,8 @@ export async function queueAudio({ file, title, caption }) {
   try {
     return await insertPending({ title: title || file.name, post_caption: caption, audio_path: path, source: 'audio' });
   } catch (err) {
-    await bucket.remove([path]);  // never leave an upload no row points at
+    const { error: removeError } = await bucket.remove([path]);  // never leave an upload no row points at
+    if (removeError) console.error(`Could not remove the orphan upload ${path} from ${AUDIO_BUCKET}`, removeError);
     throw err;
   }
 }
@@ -81,8 +82,10 @@ export async function retryReel(id) {
 }
 
 export async function deleteReel(reel) {
-  const { error } = await supabase.from(TABLE).delete().eq('id', reel.id);
+  // Row-level security refuses silently (zero rows, no error), so count what was deleted.
+  const { data, error } = await supabase.from(TABLE).delete().eq('id', reel.id).select('id');
   if (error) throw new Error(`Delete failed: ${error.message}`);
+  if (!data.length) throw new Error('Nothing was deleted: the reel is already gone, or this account may not delete it. Reload to check.');
   if (reel.audio_path) {
     const { error: removeError } = await supabase.storage.from(AUDIO_BUCKET).remove([reel.audio_path]);
     if (removeError) console.warn('Reel deleted, but its audio file was not', removeError);

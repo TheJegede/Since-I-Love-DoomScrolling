@@ -96,6 +96,19 @@ describe('queue', () => {
     expect(fake.removed).toEqual([{ bucket: 'audio-uploads', path: 'a1.m4a' }]);
   });
 
+  it('deleteReel says so when nothing was deleted (row gone, or refused by row-level security)', async () => {
+    await expect(deleteReel({ id: 'missing' })).rejects.toThrow(/Nothing was deleted/);
+  });
+
+  it('queueAudio reports an orphan upload it could not remove', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fake.failNext('saved_reels', 'insert', { message: 'permission denied' });
+    fake.failNext('audio-uploads', 'remove', { message: 'storage down' });
+    await expect(queueAudio({ file: audioFile() })).rejects.toThrow(/permission denied/);
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(fake.uploads[0].path), expect.anything());
+    consoleError.mockRestore();
+  });
+
   it('requestClusterRecompute treats an already-active job as success', async () => {
     await requestClusterRecompute();
     expect(fake.tables.cluster_jobs).toHaveLength(1);

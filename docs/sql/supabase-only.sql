@@ -24,13 +24,16 @@ create table if not exists public.worker_status (
   last_seen timestamptz not null
 );
 alter table public.worker_status enable row level security;
+-- Supabase usually grants these by default; explicit so the dashboard's Data API calls can't hit "permission denied".
+grant select, insert on public.cluster_jobs to authenticated;
+grant select on public.worker_status to authenticated;
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values ('audio-uploads', 'audio-uploads', false, 26214400, array['audio/*'])
 on conflict (id) do nothing;
 
 -- Task 1 rollback (the new objects are empty until Task 8):
--- delete from storage.buckets where id = 'audio-uploads';
+-- delete from storage.buckets where id = 'audio-uploads';  -- if refused: Storage → audio-uploads → Delete bucket
 -- drop table if exists public.worker_status;
 -- drop table if exists public.cluster_jobs;
 -- alter table public.saved_reels drop column if exists audio_path;
