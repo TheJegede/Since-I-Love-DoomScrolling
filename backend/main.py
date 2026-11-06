@@ -617,6 +617,50 @@ def _recluster_late_reels(items: List[dict], clusters: List[str]) -> None:
         db.set_cluster(reel_ids, cluster)
 
 
+def recompute_clusters() -> int:
+    """Regroup every extracted reel into named clusters. Returns how many reels were assigned."""
+    rows = db.reels_for_clustering()
+    if not rows:
+        return 0
+
+    items = []
+    unextracted_ids = []  # queued or failed reels: nothing to cluster on
+    for r in rows:
+        ej = r["extracted_json"]
+        embedding = r["embedding"]
+        if embedding is None:
+            # Not embedded yet (e.g. saved while the model was unavailable): repair it now.
+            embedding = embed_reel(ej)
+            if embedding is not None:
+                db.set_embedding(r["id"], embedding)
+        if embedding is None:
+            unextracted_ids.append(r["id"])
+        else:
+            items.append({"id": r["id"], "topic": ej.get("core_topic", ""),
+                          "takeaway": ej.get("key_takeaway", ""), "embedding": embedding})
+
+    db.set_cluster(unextracted_ids, None)
+    assignments = cluster_topics_semantically(items)
+    ids_by_cluster = {}
+    for assignment in assignments:
+        ids_by_cluster.setdefault(assignment["cluster"], []).append(assignment["id"])
+    for cluster, reel_ids in ids_by_cluster.items():
+        db.set_cluster(reel_ids, cluster)
+    applied = sum(len(reel_ids) for reel_ids in ids_by_cluster.values())
+    _recluster_late_reels(items, [a["cluster"] for a in assignments])
+    logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
+    return applied
+
+
+def run_cluster_job(job: dict) -> None:
+    """Run one recompute requested from the dashboard and record the outcome on its row."""
+    try:
+        db.finish_cluster_job(job["id"], "done", recompute_clusters())
+    except Exception as e:
+        logger.error(f"Cluster job {job['id']} failed: {e}")
+        db.finish_cluster_job(job["id"], "error", error=str(e))
+
+
 def run_cluster_recompute_task():
     CLUSTER_JOB.update({
         "status": "running",
@@ -626,44 +670,9 @@ def run_cluster_recompute_task():
         "error": None,
     })
     try:
-        rows = db.reels_for_clustering()
-        if not rows:
-            CLUSTER_JOB.update({
-                "status": "done",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            })
-            return
-
-        items = []
-        unextracted_ids = []  # queued or failed reels: nothing to cluster on
-        for r in rows:
-            ej = r["extracted_json"]
-            embedding = r["embedding"]
-            if embedding is None:
-                # Not embedded yet (e.g. saved while the model was unavailable): repair it now.
-                embedding = embed_reel(ej)
-                if embedding is not None:
-                    db.set_embedding(r["id"], embedding)
-            if embedding is None:
-                unextracted_ids.append(r["id"])
-            else:
-                items.append({"id": r["id"], "topic": ej.get("core_topic", ""),
-                              "takeaway": ej.get("key_takeaway", ""), "embedding": embedding})
-
-        db.set_cluster(unextracted_ids, None)
-        assignments = cluster_topics_semantically(items)
-        ids_by_cluster = {}
-        for assignment in assignments:
-            ids_by_cluster.setdefault(assignment["cluster"], []).append(assignment["id"])
-        for cluster, reel_ids in ids_by_cluster.items():
-            db.set_cluster(reel_ids, cluster)
-        applied = sum(len(reel_ids) for reel_ids in ids_by_cluster.values())
-        _recluster_late_reels(items, [a["cluster"] for a in assignments])
-
-        logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
         CLUSTER_JOB.update({
             "status": "done",
-            "assigned": applied,
+            "assigned": recompute_clusters(),
             "finished_at": datetime.now(timezone.utc).isoformat(),
         })
     except Exception as e:
@@ -679,7 +688,7 @@ _CLUSTER_JOB_LOCK = threading.Lock()
 
 
 @app.post("/clusters/recompute", dependencies=[Depends(verify_api_key)])
-def recompute_clusters(background_tasks: BackgroundTasks):
+def start_cluster_recompute(background_tasks: BackgroundTasks):
     """Trigger cluster recomputation in the background."""
     # Endpoints run in a threadpool: claim the job here, or two quick requests both start one.
     with _CLUSTER_JOB_LOCK:
@@ -890,12 +899,21 @@ def _schedule_worker_retry(row: dict, error: str) -> bool:
 
 
 def worker_tick() -> bool:
-    """Process at most one pending reel. Returns True if one was claimed."""
+    """Process one pending reel, or if none is waiting, one recompute request.
+    Returns True if anything was claimed."""
+    try:
+        db.heartbeat()
+    except Exception as e:  # losing the "last seen" signal must never stop real work
+        logger.warning(f"Worker heartbeat failed: {e}")
     row = db.claim_next_pending()
-    if not row:
-        return False
-    process_pending_reel(row)
-    return True
+    if row:
+        process_pending_reel(row)
+        return True
+    job = db.claim_next_cluster_job()
+    if job:
+        run_cluster_job(job)
+        return True
+    return False
 
 
 def run_worker(drain: bool = False, idle_interval: float = 20.0) -> None:
@@ -904,13 +922,12 @@ def run_worker(drain: bool = False, idle_interval: float = 20.0) -> None:
     Idles between polls when the queue is empty; with drain=True it exits
     instead (also after a crashed tick). Shared by the in-process thread and
     run_worker.py."""
-    try:
-        recovered = db.recover_stale_processing(
-            datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
-        )
-        logger.info("Recovered %s stale queue item(s).", recovered)
-    except Exception as e:
-        logger.error(f"Stale-claim recovery failed: {e}")
+    stale_before = datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
+    for recover in (db.recover_stale_processing, db.recover_stale_cluster_jobs):
+        try:
+            logger.info("Recovered %s stale item(s) via %s.", recover(stale_before), recover.__name__)
+        except Exception as e:
+            logger.error(f"Stale-claim recovery failed ({recover.__name__}): {e}")
 
     logger.info("Queue worker started.")
     while True:

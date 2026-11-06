@@ -265,6 +265,45 @@ def recover_stale_processing(stale_before: datetime) -> int:
     return len(res.data or [])
 
 
+def heartbeat() -> None:
+    """Record that the worker is alive; the dashboard warns when this goes stale."""
+    get_client().table("worker_status").upsert(
+        {"id": 1, "last_seen": datetime.now(timezone.utc).isoformat()}).execute()
+
+
+def claim_next_cluster_job() -> Optional[dict]:
+    """Atomically claim the oldest pending recompute request, like claim_next_pending."""
+    c = get_client()
+    rows = (c.table("cluster_jobs").select("*").eq("status", "pending")
+            .order("created_at").limit(1).execute().data or [])
+    if not rows:
+        return None
+    payload = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
+    upd = (c.table("cluster_jobs").update(payload)
+           .eq("id", rows[0]["id"]).eq("status", "pending").execute())
+    if not upd.data:
+        return None  # lost the race
+    return {**rows[0], **payload}
+
+
+def finish_cluster_job(job_id: str, status: str, assigned: int = 0, error: Optional[str] = None) -> None:
+    get_client().table("cluster_jobs").update({
+        "status": status,
+        "assigned": assigned,
+        "error": str(error)[:500] if error else None,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", job_id).execute()
+
+
+def recover_stale_cluster_jobs(stale_before: datetime) -> int:
+    """Return recomputes abandoned by a crashed worker to the queue."""
+    res = (get_client().table("cluster_jobs").update({"status": "pending", "started_at": None})
+           .eq("status", "running")
+           .lt("started_at", stale_before.astimezone(timezone.utc).isoformat())
+           .execute())
+    return len(res.data or [])
+
+
 def schedule_retry(reel_id: str, error: str, next_attempt_at: datetime) -> None:
     """Release a claim for a future retry while preserving its attempt count."""
     get_client().table(TABLE).update({

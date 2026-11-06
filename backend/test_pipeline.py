@@ -23,6 +23,7 @@ from saved_parser import normalize_instagram_url, parse_saved_posts
 
 client = TestClient(main.app)
 REAL_NEAREST_CLUSTER = db.nearest_cluster  # every test stubs it; one test checks the real one
+REAL_CLAIM_NEXT_CLUSTER_JOB = getattr(db, "claim_next_cluster_job", None)  # same, for the cluster-job claim
 
 REEL_URL = "https://www.instagram.com/reel/Z/"
 LONG_TRANSCRIPT = " ".join(["word"] * 30)  # clears the 15-word silent-hook guard
@@ -122,6 +123,14 @@ def no_embedding_model(monkeypatch):
     """Never load the real embedding model in tests; embed_reel then returns None."""
     monkeypatch.setattr(main, "_get_embedding_model", raiser(RuntimeError("no embedding model in tests")))
     monkeypatch.setattr(db, "nearest_cluster", lambda embedding, min_similarity: None)  # never hit the real DB
+
+
+@pytest.fixture(autouse=True)
+def no_real_worker_db(monkeypatch):
+    """The worker's heartbeat and cluster-job queue never reach the real DB in tests."""
+    monkeypatch.setattr(db, "heartbeat", lambda: None, raising=False)
+    monkeypatch.setattr(db, "claim_next_cluster_job", lambda: None, raising=False)
+    monkeypatch.setattr(db, "recover_stale_cluster_jobs", lambda stale_before: 0, raising=False)
 
 
 @pytest.fixture
@@ -845,6 +854,82 @@ def test_done_reel_survives_audio_cleanup_failure(monkeypatch, pipeline, worker_
 
     assert main.worker_tick() is True
     assert [kind for kind, _ in worker_events] == ["done"]
+
+
+# ---------------------------------------------------------------- worker: cluster jobs and heartbeat
+
+def test_worker_runs_cluster_job_when_no_reels_queued(monkeypatch):
+    finished = []
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: None)
+    monkeypatch.setattr(main.db, "claim_next_cluster_job", lambda: {"id": "j1"})
+    monkeypatch.setattr(main, "recompute_clusters", lambda: 7, raising=False)
+    monkeypatch.setattr(main.db, "finish_cluster_job",
+                        lambda job_id, status, assigned=0, error=None: finished.append((job_id, status, assigned, error)),
+                        raising=False)
+    assert main.worker_tick() is True
+    assert finished == [("j1", "done", 7, None)]
+
+
+def test_reels_go_before_cluster_jobs(monkeypatch, pipeline):
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
+    monkeypatch.setattr(main.db, "update_reel_result", lambda **kwargs: None)
+    monkeypatch.setattr(main.db, "claim_next_cluster_job", raiser(AssertionError("reels come first")))
+    assert main.worker_tick() is True
+
+
+def test_cluster_job_failure_is_recorded(monkeypatch):
+    finished = []
+    monkeypatch.setattr(main, "recompute_clusters", raiser(RuntimeError("boom")), raising=False)
+    monkeypatch.setattr(main.db, "finish_cluster_job",
+                        lambda job_id, status, assigned=0, error=None: finished.append((job_id, status, error)),
+                        raising=False)
+    main.run_cluster_job({"id": "j1"})
+    assert finished == [("j1", "error", "boom")]
+
+
+def test_heartbeat_failure_does_not_stop_the_worker(monkeypatch, pipeline):
+    saved = []
+    monkeypatch.setattr(main.db, "heartbeat", raiser(RuntimeError("db offline")))
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
+    monkeypatch.setattr(main.db, "update_reel_result", lambda **kwargs: saved.append(kwargs["reel_id"]))
+    assert main.worker_tick() is True
+    assert saved == ["row1"]
+
+
+def test_worker_tick_writes_a_heartbeat(monkeypatch):
+    beats = []
+    monkeypatch.setattr(main.db, "heartbeat", lambda: beats.append(1))
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: None)
+    assert main.worker_tick() is False
+    assert beats == [1]
+
+
+def test_run_worker_recovers_stale_cluster_jobs(monkeypatch):
+    recovered = []
+    monkeypatch.setattr(main.db, "recover_stale_processing", lambda stale_before: 0)
+    monkeypatch.setattr(main.db, "recover_stale_cluster_jobs", lambda stale_before: recovered.append(stale_before) or 0)
+    monkeypatch.setattr(main, "worker_tick", lambda: False)
+    main.run_worker(drain=True)
+    assert len(recovered) == 1
+
+
+def test_claim_next_cluster_job_returns_none_when_race_lost(monkeypatch):
+    class LostRace:
+        """Select finds a pending job; the guarded update matches nothing (another worker won)."""
+        def __init__(self):
+            self.updating = False
+        def select(self, *a, **k): return self
+        def eq(self, *a): return self
+        def order(self, *a, **k): return self
+        def limit(self, *a): return self
+        def update(self, payload):
+            self.updating = True
+            return self
+        def execute(self):
+            return type("R", (), {"data": [] if self.updating else [{"id": "j1", "status": "pending"}]})()
+    monkeypatch.setattr(db, "get_client", fake_client(LostRace()))
+    assert REAL_CLAIM_NEXT_CLUSTER_JOB is not None, "db.claim_next_cluster_job is missing"
+    assert REAL_CLAIM_NEXT_CLUSTER_JOB() is None
 
 
 # ---------------------------------------------------------------- backup export
