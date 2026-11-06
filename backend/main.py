@@ -830,7 +830,8 @@ def process_pending_reel(row: dict) -> None:
                 return
             # A reel already saved (or queued) under its clean URL is not downloaded twice;
             # a failed copy doesn't count — sharing again after a failure is a retry.
-            copies = [r for r in db.other_reels_with_url(clean_url, reel_id) if r["status"] not in db.FAILURE_STATUSES]
+            others = db.other_reels_with_url(clean_url, reel_id)
+            copies = [r for r in others if r["status"] not in db.FAILURE_STATUSES]
             if copies:
                 logger.info(f"Reel {reel_id} is already saved as {copies[0]['id']}; dropping the queued copy.")
                 db.delete_reel(reel_id)
@@ -856,7 +857,8 @@ def process_pending_reel(row: dict) -> None:
             post_caption=post_caption,
             extracted_json=extracted_json,
             **search_fields(extracted_json),
-            **({"url": clean_url} if url else {}),
+            # saved_reels.url is UNIQUE: only take the clean URL if no (failed) copy already holds it.
+            **({"url": clean_url} if url and not others else {}),
         )
         logger.info(f"Worker processed reel {reel_id} ({url or audio_path or 'pasted text'})")
         if uploaded_audio:

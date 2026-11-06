@@ -871,7 +871,10 @@ def test_worker_reprocesses_a_reel_whose_saved_copy_failed(monkeypatch, pipeline
     monkeypatch.setattr(main.db, "other_reels_with_url", lambda url, exclude_id: [{"id": "old", "status": "cookies_expired"}])
     queue_row(monkeypatch, id="s1", url=SHARED_URL)
     assert main.worker_tick() is True
-    assert [kind for kind, _ in worker_events] == ["done"]
+    [(kind, saved)] = worker_events
+    assert kind == "done"
+    # saved_reels.url is UNIQUE and the failed copy already holds the clean URL: keep the shared one.
+    assert "url" not in saved
 
 
 def test_url_row_never_deletes_stored_audio(monkeypatch, pipeline, worker_events):

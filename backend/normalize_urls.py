@@ -39,9 +39,13 @@ if __name__ == "__main__":
     if not apply:
         print("Dry run: nothing changed. Re-run with --apply.")
         sys.exit(0)
-    for reel_id, clean_url in todo["updates"]:
-        db.set_url(reel_id, clean_url)
-    print(f"Cleaned {len(todo['updates'])} link(s).")
+    # saved_reels.url is UNIQUE: drop duplicates first (one may already hold the clean link),
+    # and without --delete-duplicates leave alone any reel that still has a copy.
     if delete:
         deleted = sum(db.delete_reel(drop) for drop, _, _ in todo["duplicates"])
         print(f"Deleted {deleted} duplicate(s).")
+    still_copied = set() if delete else {keep for _, keep, _ in todo["duplicates"]}
+    updates = [(reel_id, url) for reel_id, url in todo["updates"] if reel_id not in still_copied]
+    for reel_id, clean_url in updates:
+        db.set_url(reel_id, clean_url)
+    print(f"Cleaned {len(updates)} link(s); skipped {len(todo['updates']) - len(updates)} that still have a duplicate.")
