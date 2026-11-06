@@ -617,6 +617,50 @@ def _recluster_late_reels(items: List[dict], clusters: List[str]) -> None:
         db.set_cluster(reel_ids, cluster)
 
 
+def recompute_clusters() -> int:
+    """Regroup every extracted reel into named clusters. Returns how many reels were assigned."""
+    rows = db.reels_for_clustering()
+    if not rows:
+        return 0
+
+    items = []
+    unextracted_ids = []  # queued or failed reels: nothing to cluster on
+    for r in rows:
+        ej = r["extracted_json"]
+        embedding = r["embedding"]
+        if embedding is None:
+            # Not embedded yet (e.g. saved while the model was unavailable): repair it now.
+            embedding = embed_reel(ej)
+            if embedding is not None:
+                db.set_embedding(r["id"], embedding)
+        if embedding is None:
+            unextracted_ids.append(r["id"])
+        else:
+            items.append({"id": r["id"], "topic": ej.get("core_topic", ""),
+                          "takeaway": ej.get("key_takeaway", ""), "embedding": embedding})
+
+    db.set_cluster(unextracted_ids, None)
+    assignments = cluster_topics_semantically(items)
+    ids_by_cluster = {}
+    for assignment in assignments:
+        ids_by_cluster.setdefault(assignment["cluster"], []).append(assignment["id"])
+    for cluster, reel_ids in ids_by_cluster.items():
+        db.set_cluster(reel_ids, cluster)
+    applied = sum(len(reel_ids) for reel_ids in ids_by_cluster.values())
+    _recluster_late_reels(items, [a["cluster"] for a in assignments])
+    logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
+    return applied
+
+
+def run_cluster_job(job: dict) -> None:
+    """Run one recompute requested from the dashboard and record the outcome on its row."""
+    try:
+        db.finish_cluster_job(job["id"], "done", recompute_clusters())
+    except Exception as e:
+        logger.error(f"Cluster job {job['id']} failed: {e}")
+        db.finish_cluster_job(job["id"], "error", error=str(e))
+
+
 def run_cluster_recompute_task():
     CLUSTER_JOB.update({
         "status": "running",
@@ -626,44 +670,9 @@ def run_cluster_recompute_task():
         "error": None,
     })
     try:
-        rows = db.reels_for_clustering()
-        if not rows:
-            CLUSTER_JOB.update({
-                "status": "done",
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-            })
-            return
-
-        items = []
-        unextracted_ids = []  # queued or failed reels: nothing to cluster on
-        for r in rows:
-            ej = r["extracted_json"]
-            embedding = r["embedding"]
-            if embedding is None:
-                # Not embedded yet (e.g. saved while the model was unavailable): repair it now.
-                embedding = embed_reel(ej)
-                if embedding is not None:
-                    db.set_embedding(r["id"], embedding)
-            if embedding is None:
-                unextracted_ids.append(r["id"])
-            else:
-                items.append({"id": r["id"], "topic": ej.get("core_topic", ""),
-                              "takeaway": ej.get("key_takeaway", ""), "embedding": embedding})
-
-        db.set_cluster(unextracted_ids, None)
-        assignments = cluster_topics_semantically(items)
-        ids_by_cluster = {}
-        for assignment in assignments:
-            ids_by_cluster.setdefault(assignment["cluster"], []).append(assignment["id"])
-        for cluster, reel_ids in ids_by_cluster.items():
-            db.set_cluster(reel_ids, cluster)
-        applied = sum(len(reel_ids) for reel_ids in ids_by_cluster.values())
-        _recluster_late_reels(items, [a["cluster"] for a in assignments])
-
-        logger.info(f"Recomputed clusters: assigned {applied} of {len(rows)} reels.")
         CLUSTER_JOB.update({
             "status": "done",
-            "assigned": applied,
+            "assigned": recompute_clusters(),
             "finished_at": datetime.now(timezone.utc).isoformat(),
         })
     except Exception as e:
@@ -679,7 +688,7 @@ _CLUSTER_JOB_LOCK = threading.Lock()
 
 
 @app.post("/clusters/recompute", dependencies=[Depends(verify_api_key)])
-def recompute_clusters(background_tasks: BackgroundTasks):
+def start_cluster_recompute(background_tasks: BackgroundTasks):
     """Trigger cluster recomputation in the background."""
     # Endpoints run in a threadpool: claim the job here, or two quick requests both start one.
     with _CLUSTER_JOB_LOCK:
@@ -707,23 +716,49 @@ def _run_pipeline(url: str, allow_caption_fallback: bool = True) -> tuple[str, s
     mp3_path = None
     try:
         mp3_path, post_caption, title = download_and_extract_audio(url)
-        raw_transcript = ""
-        try:
-            raw_transcript = transcribe_audio(mp3_path)
-        except Exception as e:
-            if not allow_caption_fallback:
-                raise
-            logger.warning(f"Transcription failed: {str(e)}. Proceeding using metadata/caption only.")
-        guard_silent_hook(raw_transcript, post_caption)
-        extracted = extract_structured_json(raw_transcript, post_caption)
+        raw_transcript, extracted = _transcribe_and_extract(mp3_path, post_caption, allow_caption_fallback)
         return title, raw_transcript, post_caption, extracted
     finally:
-        if mp3_path and os.path.exists(mp3_path):
-            try:
-                os.remove(mp3_path)
-                logger.info(f"Cleaned up temporary audio file: {mp3_path}")
-            except Exception as ce:
-                logger.warning(f"Could not delete temp file {mp3_path}: {str(ce)}")
+        _remove_temp_file(mp3_path)
+
+
+def _remove_temp_file(path: Optional[str]) -> None:
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+            logger.info(f"Cleaned up temporary audio file: {path}")
+        except Exception as ce:
+            logger.warning(f"Could not delete temp file {path}: {str(ce)}")
+
+
+def _transcribe_and_extract(audio_file: str, caption: Optional[str],
+                            allow_caption_fallback: bool) -> tuple[str, ReelExtraction]:
+    """Transcribe → silent-hook guard → LLM extract. Returns (raw_transcript, extracted).
+
+    A failed transcription falls back to the caption alone unless
+    allow_caption_fallback is False, in which case it raises."""
+    raw_transcript = ""
+    try:
+        raw_transcript = transcribe_audio(audio_file)
+    except Exception as e:
+        if not allow_caption_fallback:
+            raise
+        logger.warning(f"Transcription failed: {str(e)}. Proceeding using metadata/caption only.")
+    guard_silent_hook(raw_transcript, caption)
+    return raw_transcript, extract_structured_json(raw_transcript, caption or "")
+
+
+def _extract_from_audio_row(row: dict, allow_caption_fallback: bool) -> tuple[str, ReelExtraction]:
+    """Fetch a dashboard upload from Storage into a temp file, then transcribe and extract it."""
+    suffix = os.path.splitext(row["audio_path"])[1] or ".mp3"
+    temp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+    try:
+        temp.write(db.download_audio(row["audio_path"]))
+        temp.close()
+        return _transcribe_and_extract(temp.name, row.get("post_caption"), allow_caption_fallback)
+    finally:
+        temp.close()
+        _remove_temp_file(temp.name)
 
 
 def process_reel_url(url: str) -> dict:
@@ -774,22 +809,46 @@ def extract_url(payload: dict):
 def process_pending_reel(row: dict) -> None:
     """Run the pipeline for one claimed queue row and UPDATE it in place.
 
-    Unlike process_reel_url, this never inserts — the row already exists as
-    'processing'. Download failures (e.g. IG 403) mark the row 'failed' so it
-    can be retried later by resetting its status to 'pending'."""
+    The row says what to do: a URL is downloaded (Shortcut, pasted URL, bulk
+    import), an audio_path is fetched from Storage (dashboard upload), and
+    otherwise its pasted transcript/caption is extracted directly. Failures
+    are retried with backoff or marked with a failure status the dashboard
+    can retry."""
     reel_id = row["id"]
-    url = row["url"]
-    clean_url = normalize_instagram_url(url)
-    if not is_valid_instagram_reel(clean_url):
-        logger.warning(f"Worker rejected reel {reel_id}: Invalid URL format ({url})")
-        db.mark_failed(reel_id, f"Invalid Instagram Reel URL format: {url}")
-        return
+    url = row.get("url")
+    audio_path = row.get("audio_path")
+    uploaded_audio = None  # set only when this row's audio was what got processed
     try:
         # A failed transcription is retried like any transient error; only the
         # last attempt settles for a caption-only extraction.
         is_final_attempt = int(row.get("attempt_count") or 0) >= MAX_WORKER_ATTEMPTS
-        title, raw_transcript, post_caption, extracted = _run_pipeline(
-            clean_url, allow_caption_fallback=is_final_attempt)
+        if url:
+            clean_url = normalize_instagram_url(url)
+            if not is_valid_instagram_reel(clean_url):
+                logger.warning(f"Worker rejected reel {reel_id}: Invalid URL format ({url})")
+                db.mark_failed(reel_id, f"Invalid Instagram Reel URL format: {url}")
+                return
+            # A reel already saved (or queued) under its clean URL is not downloaded twice;
+            # a failed copy doesn't count — sharing again after a failure is a retry.
+            others = db.other_reels_with_url(clean_url, reel_id)
+            copies = [r for r in others if r["status"] not in db.FAILURE_STATUSES]
+            if copies:
+                logger.info(f"Reel {reel_id} is already saved as {copies[0]['id']}; dropping the queued copy.")
+                db.delete_reel(reel_id)
+                return
+            title, raw_transcript, post_caption, extracted = _run_pipeline(
+                clean_url, allow_caption_fallback=is_final_attempt)
+        elif audio_path:
+            title, post_caption = row.get("title"), row.get("post_caption")
+            raw_transcript, extracted = _extract_from_audio_row(row, is_final_attempt)
+            uploaded_audio = audio_path
+        elif (row.get("raw_transcript") or "").strip() or (row.get("post_caption") or "").strip():
+            title = row.get("title")
+            raw_transcript, post_caption = row.get("raw_transcript") or "", row.get("post_caption") or ""
+            extracted = extract_structured_json(raw_transcript, post_caption)
+        else:
+            db.mark_failed(reel_id, "Nothing to process: no URL, audio or text.")
+            return
         extracted_json = extracted.model_dump()
         db.update_reel_result(
             reel_id=reel_id,
@@ -798,8 +857,15 @@ def process_pending_reel(row: dict) -> None:
             post_caption=post_caption,
             extracted_json=extracted_json,
             **search_fields(extracted_json),
+            # saved_reels.url is UNIQUE: only take the clean URL if no (failed) copy already holds it.
+            **({"url": clean_url} if url and not others else {}),
         )
-        logger.info(f"Worker processed reel {reel_id} ({url})")
+        logger.info(f"Worker processed reel {reel_id} ({url or audio_path or 'pasted text'})")
+        if uploaded_audio:
+            try:
+                db.delete_audio(uploaded_audio)
+            except Exception as e:  # the reel is saved; a leftover file only costs Storage space
+                logger.warning(f"Could not delete uploaded audio {uploaded_audio}: {e}")
     except HTTPException as e:
         logger.warning(f"Worker failed reel {reel_id}: {e.detail}")
         if is_retryable_worker_error(e) and _schedule_worker_retry(row, e.detail):
@@ -845,12 +911,21 @@ def _schedule_worker_retry(row: dict, error: str) -> bool:
 
 
 def worker_tick() -> bool:
-    """Process at most one pending reel. Returns True if one was claimed."""
+    """Process one pending reel, or if none is waiting, one recompute request.
+    Returns True if anything was claimed."""
+    try:
+        db.heartbeat()
+    except Exception as e:  # losing the "last seen" signal must never stop real work
+        logger.warning(f"Worker heartbeat failed: {e}")
     row = db.claim_next_pending()
-    if not row:
-        return False
-    process_pending_reel(row)
-    return True
+    if row:
+        process_pending_reel(row)
+        return True
+    job = db.claim_next_cluster_job()
+    if job:
+        run_cluster_job(job)
+        return True
+    return False
 
 
 def run_worker(drain: bool = False, idle_interval: float = 20.0) -> None:
@@ -859,13 +934,12 @@ def run_worker(drain: bool = False, idle_interval: float = 20.0) -> None:
     Idles between polls when the queue is empty; with drain=True it exits
     instead (also after a crashed tick). Shared by the in-process thread and
     run_worker.py."""
-    try:
-        recovered = db.recover_stale_processing(
-            datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
-        )
-        logger.info("Recovered %s stale queue item(s).", recovered)
-    except Exception as e:
-        logger.error(f"Stale-claim recovery failed: {e}")
+    stale_before = datetime.now(timezone.utc) - timedelta(minutes=WORKER_STALE_MINUTES)
+    for recover in (db.recover_stale_processing, db.recover_stale_cluster_jobs):
+        try:
+            logger.info("Recovered %s stale item(s) via %s.", recover(stale_before), recover.__name__)
+        except Exception as e:
+            logger.error(f"Stale-claim recovery failed ({recover.__name__}): {e}")
 
     logger.info("Queue worker started.")
     while True:

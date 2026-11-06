@@ -3,6 +3,7 @@
 Run from the repo root:  python -m pytest backend
 """
 import io
+import json
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -22,6 +23,7 @@ from saved_parser import normalize_instagram_url, parse_saved_posts
 
 client = TestClient(main.app)
 REAL_NEAREST_CLUSTER = db.nearest_cluster  # every test stubs it; one test checks the real one
+REAL_CLAIM_NEXT_CLUSTER_JOB = getattr(db, "claim_next_cluster_job", None)  # same, for the cluster-job claim
 
 REEL_URL = "https://www.instagram.com/reel/Z/"
 LONG_TRANSCRIPT = " ".join(["word"] * 30)  # clears the 15-word silent-hook guard
@@ -121,6 +123,15 @@ def no_embedding_model(monkeypatch):
     """Never load the real embedding model in tests; embed_reel then returns None."""
     monkeypatch.setattr(main, "_get_embedding_model", raiser(RuntimeError("no embedding model in tests")))
     monkeypatch.setattr(db, "nearest_cluster", lambda embedding, min_similarity: None)  # never hit the real DB
+
+
+@pytest.fixture(autouse=True)
+def no_real_worker_db(monkeypatch):
+    """The worker's heartbeat and cluster-job queue never reach the real DB in tests."""
+    monkeypatch.setattr(db, "heartbeat", lambda: None, raising=False)
+    monkeypatch.setattr(db, "claim_next_cluster_job", lambda: None, raising=False)
+    monkeypatch.setattr(db, "recover_stale_cluster_jobs", lambda stale_before: 0, raising=False)
+    monkeypatch.setattr(db, "other_reels_with_url", lambda url, exclude_id: [], raising=False)
 
 
 @pytest.fixture
@@ -463,7 +474,7 @@ def test_worker_tick_success(monkeypatch, pipeline):
     saved = {}
     monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
     monkeypatch.setattr(main.db, "update_reel_result",
-                        lambda reel_id, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None:
+                        lambda reel_id, title, raw_transcript, post_caption, extracted_json, embedding=None, cluster=None, url=None:
                         saved.update(id=reel_id, title=title))
     monkeypatch.setattr(main.db, "mark_failed", raiser(AssertionError("should not be marked failed")))
     assert main.worker_tick() is True
@@ -757,3 +768,237 @@ def test_embedding_queue_helpers(monkeypatch):
     db.set_embedding("a", [0.5])
     assert table.payloads == [{"embedding": [0.5]}]
     assert ("eq", ("id", "a")) in table.filters
+
+
+# ---------------------------------------------------------------- worker: text and audio rows
+
+@pytest.fixture
+def worker_events(monkeypatch):
+    """Record what the worker writes; any unexpected write shows up in the list."""
+    events = []
+    monkeypatch.setattr(main.db, "update_reel_result", lambda **kwargs: events.append(("done", kwargs)))
+    monkeypatch.setattr(main.db, "mark_failed", lambda *args, **kwargs: events.append(("failed", args)))
+    monkeypatch.setattr(main.db, "schedule_retry", lambda reel_id, error, when: events.append(("retry", reel_id)))
+    monkeypatch.setattr(main.db, "delete_audio", lambda path: events.append(("deleted", path)), raising=False)
+    return events
+
+
+def queue_row(monkeypatch, **row):
+    monkeypatch.setattr(main.db, "claim_next_pending",
+                        lambda: {"url": None, "audio_path": None, "raw_transcript": "", "post_caption": None,
+                                 "title": None, "attempt_count": 1, **row})
+
+
+def test_worker_processes_text_row(monkeypatch, pipeline, worker_events):
+    seen = []
+    monkeypatch.setattr(main, "extract_structured_json", lambda t, c: seen.append((t, c)) or EXTRACTION)
+    monkeypatch.setattr(main, "download_and_extract_audio", raiser(AssertionError("text rows are not downloaded")))
+    queue_row(monkeypatch, id="t1", title="Notes", raw_transcript=LONG_TRANSCRIPT, post_caption="cap")
+
+    assert main.worker_tick() is True
+    assert seen == [(LONG_TRANSCRIPT, "cap")]
+    [(kind, saved)] = worker_events
+    assert kind == "done"
+    assert (saved["reel_id"], saved["title"], saved["raw_transcript"]) == ("t1", "Notes", LONG_TRANSCRIPT)
+
+
+def test_worker_processes_audio_row_and_deletes_file(monkeypatch, pipeline, worker_events):
+    transcribed = {}
+
+    def fake_transcribe(path):
+        transcribed["path"] = path
+        with open(path, "rb") as f:
+            transcribed["bytes"] = f.read()
+        return LONG_TRANSCRIPT
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main, "transcribe_audio", fake_transcribe)
+    queue_row(monkeypatch, id="a1", title="Voice memo", audio_path="a1.m4a", post_caption="cap")
+
+    assert main.worker_tick() is True
+    assert transcribed["path"].endswith(".m4a") and transcribed["bytes"] == b"audio"
+    assert not os.path.exists(transcribed["path"])
+    assert [kind for kind, _ in worker_events] == ["done", "deleted"]
+    assert worker_events[0][1]["raw_transcript"] == LONG_TRANSCRIPT
+    assert worker_events[0][1]["title"] == "Voice memo"
+    assert worker_events[1][1] == "a1.m4a"
+
+
+def test_audio_row_keeps_file_when_transcription_fails(monkeypatch, pipeline, worker_events):
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main, "transcribe_audio", raiser(HTTPException(status_code=500, detail="x")))
+    queue_row(monkeypatch, id="a1", audio_path="a1.m4a")
+
+    assert main.worker_tick() is True
+    assert worker_events == [("retry", "a1")]
+
+
+def test_audio_row_without_speech_or_caption_fails(monkeypatch, pipeline, worker_events):
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main, "transcribe_audio", lambda path: "")
+    queue_row(monkeypatch, id="a1", audio_path="a1.m4a", post_caption=None)
+
+    assert main.worker_tick() is True
+    [(kind, args)] = worker_events
+    assert kind == "failed" and args[0] == "a1" and "No spoken audio" in args[1]
+
+
+SHARED_URL = "https://www.instagram.com/reel/Z/?igsh=abc123"  # what the iPhone Shortcut stores
+
+
+def test_worker_saves_the_clean_url(monkeypatch, pipeline, worker_events):
+    queue_row(monkeypatch, id="s1", url=SHARED_URL)
+    assert main.worker_tick() is True
+    [(kind, saved)] = worker_events
+    assert kind == "done" and saved["url"] == REEL_URL
+
+
+def test_worker_drops_a_queued_copy_of_a_saved_reel(monkeypatch, worker_events):
+    deleted, asked = [], []
+    monkeypatch.setattr(main.db, "other_reels_with_url",
+                        lambda url, exclude_id: asked.append((url, exclude_id)) or [{"id": "old", "status": "done"}])
+    monkeypatch.setattr(main.db, "delete_reel", lambda reel_id: deleted.append(reel_id) or True)
+    monkeypatch.setattr(main, "_run_pipeline", raiser(AssertionError("a saved reel is not downloaded again")))
+    queue_row(monkeypatch, id="s1", url=SHARED_URL)
+
+    assert main.worker_tick() is True
+    assert asked == [(REEL_URL, "s1")]
+    assert deleted == ["s1"]
+    assert worker_events == []
+
+
+def test_worker_reprocesses_a_reel_whose_saved_copy_failed(monkeypatch, pipeline, worker_events):
+    """Sharing again after a failure (e.g. expired cookies) is a deliberate retry."""
+    monkeypatch.setattr(main.db, "other_reels_with_url", lambda url, exclude_id: [{"id": "old", "status": "cookies_expired"}])
+    queue_row(monkeypatch, id="s1", url=SHARED_URL)
+    assert main.worker_tick() is True
+    [(kind, saved)] = worker_events
+    assert kind == "done"
+    # saved_reels.url is UNIQUE and the failed copy already holds the clean URL: keep the shared one.
+    assert "url" not in saved
+
+
+def test_url_row_never_deletes_stored_audio(monkeypatch, pipeline, worker_events):
+    """An audio_path on a URL row (e.g. inserted with the public key) must not delete an owner's upload."""
+    queue_row(monkeypatch, id="u1", url=REEL_URL, audio_path="owners-upload.m4a")
+    assert main.worker_tick() is True
+    assert [kind for kind, _ in worker_events] == ["done"]
+
+
+def test_row_with_nothing_to_process_fails(monkeypatch, worker_events):
+    queue_row(monkeypatch, id="n1")
+    assert main.worker_tick() is True
+    assert worker_events == [("failed", ("n1", "Nothing to process: no URL, audio or text."))]
+
+
+def test_done_reel_survives_audio_cleanup_failure(monkeypatch, pipeline, worker_events):
+    monkeypatch.setattr(main.db, "download_audio", lambda path: b"audio", raising=False)
+    monkeypatch.setattr(main.db, "delete_audio", raiser(RuntimeError("storage down")), raising=False)
+    queue_row(monkeypatch, id="a1", audio_path="a1.mp3")
+
+    assert main.worker_tick() is True
+    assert [kind for kind, _ in worker_events] == ["done"]
+
+
+# ---------------------------------------------------------------- worker: cluster jobs and heartbeat
+
+def test_worker_runs_cluster_job_when_no_reels_queued(monkeypatch):
+    finished = []
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: None)
+    monkeypatch.setattr(main.db, "claim_next_cluster_job", lambda: {"id": "j1"})
+    monkeypatch.setattr(main, "recompute_clusters", lambda: 7, raising=False)
+    monkeypatch.setattr(main.db, "finish_cluster_job",
+                        lambda job_id, status, assigned=0, error=None: finished.append((job_id, status, assigned, error)),
+                        raising=False)
+    assert main.worker_tick() is True
+    assert finished == [("j1", "done", 7, None)]
+
+
+def test_reels_go_before_cluster_jobs(monkeypatch, pipeline):
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
+    monkeypatch.setattr(main.db, "update_reel_result", lambda **kwargs: None)
+    monkeypatch.setattr(main.db, "claim_next_cluster_job", raiser(AssertionError("reels come first")))
+    assert main.worker_tick() is True
+
+
+def test_cluster_job_failure_is_recorded(monkeypatch):
+    finished = []
+    monkeypatch.setattr(main, "recompute_clusters", raiser(RuntimeError("boom")), raising=False)
+    monkeypatch.setattr(main.db, "finish_cluster_job",
+                        lambda job_id, status, assigned=0, error=None: finished.append((job_id, status, error)),
+                        raising=False)
+    main.run_cluster_job({"id": "j1"})
+    assert finished == [("j1", "error", "boom")]
+
+
+def test_heartbeat_failure_does_not_stop_the_worker(monkeypatch, pipeline):
+    saved = []
+    monkeypatch.setattr(main.db, "heartbeat", raiser(RuntimeError("db offline")))
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: {"id": "row1", "url": REEL_URL})
+    monkeypatch.setattr(main.db, "update_reel_result", lambda **kwargs: saved.append(kwargs["reel_id"]))
+    assert main.worker_tick() is True
+    assert saved == ["row1"]
+
+
+def test_worker_tick_writes_a_heartbeat(monkeypatch):
+    beats = []
+    monkeypatch.setattr(main.db, "heartbeat", lambda: beats.append(1))
+    monkeypatch.setattr(main.db, "claim_next_pending", lambda: None)
+    assert main.worker_tick() is False
+    assert beats == [1]
+
+
+def test_run_worker_recovers_stale_cluster_jobs(monkeypatch):
+    recovered = []
+    monkeypatch.setattr(main.db, "recover_stale_processing", lambda stale_before: 0)
+    monkeypatch.setattr(main.db, "recover_stale_cluster_jobs", lambda stale_before: recovered.append(stale_before) or 0)
+    monkeypatch.setattr(main, "worker_tick", lambda: False)
+    main.run_worker(drain=True)
+    assert len(recovered) == 1
+
+
+def test_claim_next_cluster_job_returns_none_when_race_lost(monkeypatch):
+    class LostRace:
+        """Select finds a pending job; the guarded update matches nothing (another worker won)."""
+        def __init__(self):
+            self.updating = False
+        def select(self, *a, **k): return self
+        def eq(self, *a): return self
+        def order(self, *a, **k): return self
+        def limit(self, *a): return self
+        def update(self, payload):
+            self.updating = True
+            return self
+        def execute(self):
+            return type("R", (), {"data": [] if self.updating else [{"id": "j1", "status": "pending"}]})()
+    monkeypatch.setattr(db, "get_client", fake_client(LostRace()))
+    assert REAL_CLAIM_NEXT_CLUSTER_JOB is not None, "db.claim_next_cluster_job is missing"
+    assert REAL_CLAIM_NEXT_CLUSTER_JOB() is None
+
+
+# ---------------------------------------------------------------- one-time URL cleanup
+
+def test_url_cleanup_plan_fixes_links_and_keeps_one_copy_per_reel():
+    import normalize_urls
+    reel = lambda rid, url, status, created: {"id": rid, "url": url, "status": status, "created_at": created}
+    rows = [
+        reel("a", "https://www.instagram.com/reel/A/?igsh=1", "done", "2026-01-01"),     # only copy: clean its link
+        reel("b1", "https://www.instagram.com/reel/B/", "done", "2026-02-02"),
+        reel("b2", "https://www.instagram.com/reel/B/?xtok=9", "done", "2026-01-01"),   # oldest finished copy wins
+        reel("c1", "https://www.instagram.com/reel/C/?srtk=2", "failed", "2026-01-01"),
+        reel("c2", "https://www.instagram.com/reel/C/", "done", "2026-03-03"),          # a finished copy beats an older failure
+        reel("d", "https://www.instagram.com/reel/D/", "done", "2026-01-01"),           # already clean, alone: untouched
+        reel("e", None, "done", "2026-01-01"),                                          # pasted text: no URL
+    ]
+    plan = normalize_urls.plan(rows)
+    assert plan["updates"] == [("a", "https://www.instagram.com/reel/A/"), ("b2", "https://www.instagram.com/reel/B/")]
+    assert [(drop, keep) for drop, keep, _ in plan["duplicates"]] == [("b1", "b2"), ("c1", "c2")]
+
+
+# ---------------------------------------------------------------- backup export
+
+def test_export_writes_every_row(monkeypatch, tmp_path):
+    import export_reels
+    rows = [{"id": str(i), "url": f"u{i}", "extracted_json": {"core_topic": "t"}} for i in range(3)]
+    monkeypatch.setattr(db, "_select_newest_first", lambda columns: rows)
+    assert export_reels.export(tmp_path / "r.json") == 3
+    assert json.loads((tmp_path / "r.json").read_text(encoding="utf-8")) == rows

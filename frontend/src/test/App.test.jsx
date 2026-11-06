@@ -2,33 +2,35 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 
 const table = vi.hoisted(() => ({ rows: [] }));
-vi.mock('../supabaseClient', async () => ({
-  supabase: (await import('./fakeSupabase')).fakeSupabase(() => table.rows),
-  rowToRecord: (r) => r,
-}));
+vi.mock('../supabaseClient', async (importOriginal) => {
+  const { createFakeSupabase } = await import('./fakeSupabase');
+  const fake = createFakeSupabase({ getTable: name => (name === 'saved_reels' ? table.rows : undefined) });
+  return { ...(await importOriginal()), supabase: fake.client, rowToRecord: (r) => r, __fake: fake };
+});
 
+import { __fake as fake } from '../supabaseClient';
 import App from '../App';
+
+const minutesAgo = (n) => new Date(Date.now() - n * 60000).toISOString();
 
 beforeEach(() => {
   vi.restoreAllMocks();
   table.rows = [];
-  globalThis.fetch = vi.fn((input) => {
-    const u = String(input);
-    if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-  });
+  fake.tables = { cluster_jobs: [], worker_status: [{ id: 1, last_seen: minutesAgo(1) }] };
+  fake.defaults = { cluster_jobs: () => ({ id: crypto.randomUUID(), status: 'pending', created_at: new Date().toISOString() }) };
+  fake.session = { user: { id: 'owner' } };
 });
 
 describe('App baseline', () => {
   it('renders the header', async () => {
     render(<App />);
-    expect(screen.getByText(/Transcriber/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Transcriber/i)).toBeInTheDocument();
     await screen.findByText(/No extractions found/i);
   });
 
   it('renders the four ingestion mode tabs', async () => {
     render(<App />);
-    expect(screen.getByText(/Reel URL/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Reel URL/i)).toBeInTheDocument();
     expect(screen.getByText(/Audio File/i)).toBeInTheDocument();
     expect(screen.getByText(/Transcript Text/i)).toBeInTheDocument();
     expect(screen.getByText(/Bulk Import/i)).toBeInTheDocument();
@@ -42,105 +44,83 @@ describe('App baseline', () => {
     );
   });
 
-  it('fetchWithAuth prompts for key and retries on 401', async () => {
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('secret_auth_token');
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
-    
-    let firstPost = true;
-    globalThis.fetch = vi.fn((input, options) => {
-      const u = String(input);
-      if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-      if (u.includes('/extract/url')) {
-        if (firstPost) {
-          firstPost = false;
-          return Promise.resolve({ status: 401 });
-        }
-        // Second post includes header
-        expect(options.headers['X-API-Key']).toBe('secret_auth_token');
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({
-            id: 'reel_new',
-            title: 'Mocked Title',
-            url: 'https://instagram.com/reel/123/',
-            extracted_json: {}
-          })
-        });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-    });
-
+  it('queues a pasted URL and opens it as queued', async () => {
     render(<App />);
     await screen.findByText(/No extractions found/i);
 
-    // Enter URL and submit
     const input = screen.getByPlaceholderText(/instagram\.com\/reel/i);
-    const form = input.closest('form');
-    
-    fireEvent.change(input, { target: { value: 'https://instagram.com/reel/123/' } });
-    fireEvent.submit(form);
+    fireEvent.change(input, { target: { value: 'https://www.instagram.com/reel/QUEUED1/?igsh=1' } });
+    fireEvent.submit(input.closest('form'));
 
-    await waitFor(() => {
-      expect(promptSpy).toHaveBeenCalled();
-      expect(setItemSpy).toHaveBeenCalledWith('transcriber_api_key', 'secret_auth_token');
-    });
+    expect(await screen.findByText('In Ingestion Queue')).toBeInTheDocument();
+    expect(screen.getByText('QUEUED →')).toBeInTheDocument();
+    expect(table.rows).toHaveLength(1);
+    expect(table.rows[0]).toMatchObject({ url: 'https://www.instagram.com/reel/QUEUED1/', status: 'pending', source: 'dashboard' });
   });
 
-  it('fetchWithAuth forgets a wrong key and says so', async () => {
-    const { fetchWithAuth } = await import('../api');
-    vi.spyOn(window, 'prompt').mockReturnValue('wrong_key');
-    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
-    const removeItemSpy = vi.spyOn(Storage.prototype, 'removeItem');
-    globalThis.fetch = vi.fn(() => Promise.resolve({ status: 401 }));
-
-    await expect(fetchWithAuth('/clusters/recompute', { method: 'POST' })).rejects.toThrow(/Wrong API key/);
-    expect(removeItemSpy).toHaveBeenCalledWith('transcriber_api_key');
-    expect(localStorage.getItem('transcriber_api_key')).toBeNull();
-    expect(setItemSpy).toHaveBeenCalledTimes(1);
-  });
-
-  it('fetchWithAuth asks once when two requests need the key at the same time', async () => {
-    const { fetchWithAuth } = await import('../api');
-    localStorage.removeItem('transcriber_api_key');
-    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('good_key');
-    globalThis.fetch = vi.fn((url, options) =>
-      Promise.resolve({ status: options.headers?.['X-API-Key'] === 'good_key' ? 200 : 401 }));
-
-    const results = await Promise.all([fetchWithAuth('/a', {}), fetchWithAuth('/b', {})]);
-    expect(results.map(r => r.status)).toEqual([200, 200]);
-    expect(promptSpy).toHaveBeenCalledTimes(1);
-    localStorage.removeItem('transcriber_api_key');
-  });
-
-  it('shows the queue banner when the submitted URL is already queued', async () => {
-    globalThis.fetch = vi.fn((input) => {
-      const u = String(input);
-      if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-      if (u.includes('/extract/url')) {
-        return Promise.resolve({
-          ok: true,
-          json: () => Promise.resolve({
-            id: 'reel_queued',
-            title: null,
-            url: 'https://www.instagram.com/reel/QUEUED1/',
-            extracted_json: {},
-            status: 'pending',
-            error: null
-          })
-        });
-      }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve([]) });
-    });
-
+  it('opens an already-saved URL instead of queuing it again', async () => {
+    table.rows = [{ id: 'q1', url: 'https://www.instagram.com/reel/QUEUED1/', status: 'pending', extracted_json: {}, created_at: minutesAgo(3) }];
     render(<App />);
-    await screen.findByText(/No extractions found/i);
+    await screen.findByText('QUEUED →');
 
     const input = screen.getByPlaceholderText(/instagram\.com\/reel/i);
     fireEvent.change(input, { target: { value: 'https://www.instagram.com/reel/QUEUED1/' } });
     fireEvent.submit(input.closest('form'));
 
     expect(await screen.findByText('In Ingestion Queue')).toBeInTheDocument();
-    expect(screen.getByText('QUEUED →')).toBeInTheDocument();
+    expect(table.rows).toHaveLength(1);
+  });
+
+  it('retries a failed reel from the card', async () => {
+    table.rows = [{ id: 'f1', title: 'Broken reel', url: 'https://www.instagram.com/reel/F1/', status: 'cookies_expired', error: '403', attempt_count: 3, extracted_json: {}, created_at: minutesAgo(5) }];
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /Retry/ }));
+    await waitFor(() => expect(table.rows[0]).toMatchObject({ status: 'pending', attempt_count: 0, error: null }));
+    expect(await screen.findByText('QUEUED →')).toBeInTheDocument();
+  });
+
+  it('deletes a reel', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    table.rows = [{ id: 'd1', title: 'Doomed reel', url: 'https://www.instagram.com/reel/D1/', status: 'done', extracted_json: { core_topic: 'x' }, created_at: minutesAgo(5) }];
+    render(<App />);
+    fireEvent.click(await screen.findByTitle('Delete reel'));
+    await waitFor(() => expect(screen.queryByText('Doomed reel')).toBeNull());
+    expect(table.rows).toHaveLength(0);
+  });
+
+  it('recompute shows Queued, then refreshes when the job is done', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    table.rows = [{ id: 'r1', title: 'Some reel', url: 'https://www.instagram.com/reel/R1/', status: 'done', cluster: null, extracted_json: { core_topic: 'x' }, created_at: minutesAgo(5) }];
+    try {
+      render(<App />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Recompute clusters' }));
+      expect(await screen.findByRole('button', { name: 'Queued…' })).toBeDisabled();
+      expect(fake.tables.cluster_jobs).toHaveLength(1);
+
+      Object.assign(fake.tables.cluster_jobs[0], { status: 'done', assigned: 1 });
+      table.rows[0].cluster = 'Fresh Cluster';
+      await vi.advanceTimersByTimeAsync(3000);
+
+      expect(await screen.findByRole('button', { name: 'Recompute clusters' })).toBeEnabled();
+      expect(await screen.findByRole('option', { name: /Fresh Cluster/ })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the worker banner when the worker is stale and something is queued', async () => {
+    fake.tables.worker_status = [{ id: 1, last_seen: minutesAgo(120) }];
+    table.rows = [{ id: 'p1', url: 'https://www.instagram.com/reel/P1/', status: 'pending', extracted_json: {}, created_at: minutesAgo(1) }];
+    render(<App />);
+    expect(await screen.findByText(/Your PC worker last ran 2 hours ago/)).toBeInTheDocument();
+  });
+
+  it('hides the worker banner when the worker ran a minute ago', async () => {
+    table.rows = [{ id: 'p1', url: 'https://www.instagram.com/reel/P1/', status: 'pending', extracted_json: {}, created_at: minutesAgo(1) }];
+    render(<App />);
+    await screen.findByText('QUEUED →');
+    await waitFor(() => expect(screen.getByText(/WORKER RAN 1 MINUTE AGO/i)).toBeInTheDocument());
+    expect(screen.queryByText(/Your PC worker/)).toBeNull();
   });
 
   it('polls for new reels, fills in queued ones, and drops queued ones deleted elsewhere', async () => {

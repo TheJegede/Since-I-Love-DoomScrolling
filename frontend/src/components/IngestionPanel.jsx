@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import {
   Clapperboard, UploadCloud, FileAudio, FileText, Link,
 } from 'lucide-react';
-import { API_BASE_URL, fetchWithAuth } from '../api';
+import { queueReelUrl, queueText, queueAudio, queueBulk, FAILURE_STATUSES } from '../queue';
 
 const INGESTION_TABS = [
   { key: 'url', label: 'Reel URL', Icon: Link },
@@ -11,25 +11,28 @@ const INGESTION_TABS = [
   { key: 'bulk', label: 'Bulk Import', Icon: UploadCloud },
 ];
 
-// The backend reports no progress, so say what is happening instead of faking stages.
+// Everything is queued for the PC worker; the reel fills in on the dashboard once it has run.
 const LOADING_LABELS = {
-  url: 'Downloading, transcribing and extracting. This usually takes under a minute.',
-  file: 'Transcribing and extracting insights...',
-  text: 'Extracting insights...',
-  bulk: 'Uploading saved_posts.json...',
+  url: 'Queuing the reel for your PC worker...',
+  file: 'Uploading the audio file...',
+  text: 'Queuing the text for your PC worker...',
+  bulk: 'Queuing reels from saved_posts.json...',
 };
 
-// POST to an /extract endpoint and return the saved record.
-async function postExtract(path, options, fallbackMessage) {
-  const response = await fetchWithAuth(`${API_BASE_URL}${path}`, { method: 'POST', ...options });
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.detail || fallbackMessage);
+/** Bulk-import progress, read from the reels the dashboard already polls. */
+function batchProgress(urls, reels) {
+  const statusByUrl = new Map(reels.map(r => [r.url, r.status]));
+  let ok = 0;
+  let failed = 0;
+  for (const url of urls) {
+    const status = statusByUrl.get(url);
+    if (status === 'done') ok += 1;
+    else if (FAILURE_STATUSES.includes(status)) failed += 1;
   }
-  return response.json();
+  return { total: urls.length, done: ok + failed, ok, failed };
 }
 
-export default function IngestionPanel({ onIngested, onError, onBatchFinished }) {
+export default function IngestionPanel({ reels, onIngested, onError, onBatchQueued }) {
   const [mode, setMode] = useState('url'); // 'url', 'file', 'text', 'bulk'
   const [isLoading, setIsLoading] = useState(false);
 
@@ -48,9 +51,10 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
   // Bulk import (saved_posts.json)
   const batchInputRef = useRef(null);
   const [batchFile, setBatchFile] = useState(null);
-  const [batchJob, setBatchJob] = useState(null);
-  const [isBatchRunning, setIsBatchRunning] = useState(false);
+  const [batchUrls, setBatchUrls] = useState(null);
   const [isBatchDragging, setIsBatchDragging] = useState(false);
+  const progress = batchUrls && batchProgress(batchUrls, reels);
+  const isBatchRunning = Boolean(progress) && progress.done < progress.total;
 
   const handleUrlSubmit = async (e) => {
     e.preventDefault();
@@ -60,10 +64,7 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
     setIsLoading(true);
 
     try {
-      const record = await postExtract('/extract/url', {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url.trim() })
-      }, "Pipeline failed during extraction.");
+      const record = await queueReelUrl(url);
       onIngested(record);
       setUrl('');
     } catch (err) {
@@ -95,13 +96,8 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
     onError(null);
     setIsLoading(true);
 
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('title', fileTitle || file.name);
-    formData.append('caption', fileCaption);
-
     try {
-      const record = await postExtract('/extract/file', { body: formData }, "Failed to process audio file.");
+      const record = await queueAudio({ file, title: fileTitle, caption: fileCaption });
       onIngested(record);
       setFile(null);
       setFileTitle('');
@@ -115,23 +111,11 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
 
   const handleTextSubmit = async (e) => {
     e.preventDefault();
-    if (!textTranscript.trim() && !textCaption.trim()) {
-      onError("Please provide either a transcript or a description caption.");
-      return;
-    }
-
     onError(null);
     setIsLoading(true);
 
     try {
-      const record = await postExtract('/extract/text', {
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title: textTitle || "Manual Text Input",
-          transcript: textTranscript,
-          caption: textCaption
-        })
-      }, "Failed to extract from text.");
+      const record = await queueText({ title: textTitle, transcript: textTranscript, caption: textCaption });
       onIngested(record);
       setTextTitle('');
       setTextCaption('');
@@ -158,51 +142,28 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
     }
   };
 
-  const pollBatchStatus = async () => {
-    try {
-      const res = await fetchWithAuth(`${API_BASE_URL}/extract/batch/status`);
-      if (!res.ok) return;
-      const job = await res.json();
-      setBatchJob(job);
-      if (job.status !== 'running') {
-        setIsBatchRunning(false);
-        onBatchFinished();
-      }
-    } catch (err) {
-      console.error("Error polling batch status", err);
-    }
-  };
-
   const handleBatchSubmit = async (e) => {
     e.preventDefault();
     if (!batchFile) return;
     onError(null);
-    setIsLoading(true);
-    const formData = new FormData();
-    formData.append('file', batchFile);
+    let data;
     try {
-      const res = await fetchWithAuth(`${API_BASE_URL}/extract/batch`, { method: 'POST', body: formData });
-      // 409: a job is already running — attach to it
-      if (!res.ok && res.status !== 409) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || 'Failed to start batch import.');
-      }
-      setIsBatchRunning(true);
+      data = JSON.parse(await batchFile.text());
+    } catch {
+      onError('Could not parse uploaded JSON.');
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const { urls } = await queueBulk(data);
+      setBatchUrls(urls);
+      onBatchQueued();  // load the newly queued rows so progress can follow them
     } catch (err) {
       onError(err.message);
     } finally {
       setIsLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (!isBatchRunning) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    pollBatchStatus();
-    const id = setInterval(pollBatchStatus, 3000);
-    return () => clearInterval(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isBatchRunning]);
 
   return (
     <section className="glass ingestion-panel">
@@ -235,7 +196,7 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
               {isLoading ? "PROCESSING..." : "EXTRACT"}
             </button>
           </div>
-          <p className="input-hint">● Ready: Paste educational reel link to synthesize metrics</p>
+          <p className="input-hint">● Queued for your PC worker, which runs every 5 minutes</p>
         </form>
       )}
 
@@ -355,20 +316,17 @@ export default function IngestionPanel({ onIngested, onError, onBatchFinished })
             {isBatchRunning ? "IMPORTING..." : "START BULK IMPORT"}
           </button>
 
-          {batchJob && (
+          {progress && (
             <div className="batch-progress">
               <div className="batch-progress-track">
                 <div
                   className="batch-progress-fill"
-                  style={{ width: `${batchJob.total ? Math.round((batchJob.done / batchJob.total) * 100) : 0}%` }}
+                  style={{ width: `${Math.round((progress.done / progress.total) * 100)}%` }}
                 />
               </div>
               <p className="batch-progress-status">
-                {batchJob.status === 'running' ? 'Running' : batchJob.status === 'done' ? 'Done' : batchJob.status} — {batchJob.done}/{batchJob.total} · ok {batchJob.ok} · failed {batchJob.failed}
+                {isBatchRunning ? 'Running' : 'Done'} — {progress.done}/{progress.total} · ok {progress.ok} · failed {progress.failed}
               </p>
-              {batchJob.current && batchJob.status === 'running' && (
-                <p className="batch-progress-current">Now: {batchJob.current}</p>
-              )}
             </div>
           )}
         </form>

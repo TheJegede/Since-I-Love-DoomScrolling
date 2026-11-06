@@ -32,3 +32,6 @@ PRODUCT.md
 
 # Agent worktrees
 .claude/worktrees/
+
+# Local database backups (backend/export_reels.py)
+backups/

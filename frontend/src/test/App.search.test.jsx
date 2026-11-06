@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within } from '@testing-library/react';
 
 const useSemanticSearch = vi.hoisted(() => vi.fn());
-vi.mock('../supabaseClient', async () => ({
+vi.mock('../supabaseClient', async (importOriginal) => ({
+  ...(await importOriginal()),
   supabase: (await import('./fakeSupabase')).fakeSupabase(() => REELS),
   rowToRecord: (r) => r,
 }));
@@ -38,11 +39,6 @@ async function searchFor(text) {
 
 beforeEach(() => {
   useSemanticSearch.mockReset().mockReturnValue(smart());
-  globalThis.fetch = vi.fn((input) => {
-    const u = String(input);
-    if (u.endsWith('/health')) return Promise.resolve({ ok: true });
-    return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
-  });
 });
 
 describe('App search', () => {

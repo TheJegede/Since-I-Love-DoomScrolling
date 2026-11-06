@@ -22,6 +22,15 @@ describe('ReelCard', () => {
     expect(onSelect).toHaveBeenCalledWith(doneReel);
   });
 
+  it('labels every failure status as Failed, never Queued', () => {
+    for (const status of ['unsupported_format', 'cookies_expired', 'failed']) {
+      const { unmount } = render(<ReelCard reel={{ ...pendingReel, status }} onSelect={() => {}} handleDelete={() => {}} />);
+      expect(screen.getByText('Failed')).toBeInTheDocument();
+      expect(screen.queryByText('Queued')).toBeNull();
+      unmount();
+    }
+  });
+
   it('renders a status placeholder for non-done reels', () => {
     render(<ReelCard reel={pendingReel} onSelect={() => {}} handleDelete={() => {}} />);
     expect(screen.getByText('PROCESSING →')).toBeInTheDocument();

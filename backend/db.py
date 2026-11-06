@@ -13,6 +13,7 @@ from typing import Optional
 from supabase import create_client, Client
 
 TABLE = "saved_reels"
+AUDIO_BUCKET = "audio-uploads"  # private Storage bucket for dashboard audio uploads
 FAILURE_STATUSES = frozenset({"failed", "cookies_expired", "unsupported_format"})
 _client: Optional[Client] = None
 
@@ -73,6 +74,12 @@ def row_to_record(r: dict) -> dict:
         "status": r.get("status") or "done",
         "error": r.get("error"),
     }
+
+
+def other_reels_with_url(url: str, exclude_id: str) -> list:
+    """[{id, status}] of every row except exclude_id saved under exactly this URL."""
+    res = get_client().table(TABLE).select("id, status").eq("url", url).neq("id", exclude_id).execute()
+    return res.data or []
 
 
 def get_reel_by_url(url: str) -> Optional[dict]:
@@ -147,6 +154,10 @@ def reels_missing_embedding() -> list:
     return _select_newest_first("id, extracted_json", refine=lambda q: q.is_("embedding", "null"))
 
 
+def set_url(reel_id: str, url: str) -> None:
+    get_client().table(TABLE).update({"url": url}).eq("id", reel_id).execute()
+
+
 def set_embedding(reel_id: str, embedding: list) -> None:
     get_client().table(TABLE).update({"embedding": embedding}).eq("id", reel_id).execute()
 
@@ -167,6 +178,14 @@ def nearest_cluster(embedding: list, min_similarity: float) -> Optional[str]:
 def set_cluster(reel_ids: list, cluster: Optional[str]) -> None:
     for chunk in _chunked(reel_ids, 100):
         get_client().table(TABLE).update({"cluster": cluster}).in_("id", chunk).execute()
+
+
+def download_audio(path: str) -> bytes:
+    return get_client().storage.from_(AUDIO_BUCKET).download(path)
+
+
+def delete_audio(path: str) -> None:
+    get_client().storage.from_(AUDIO_BUCKET).remove([path])
 
 
 def delete_reel(reel_id: str) -> bool:
@@ -204,8 +223,9 @@ def claim_next_pending() -> Optional[dict]:
 
 
 def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
-                       extracted_json, status: str = "done", embedding=None, cluster=None) -> None:
-    """Write pipeline results back onto an existing (claimed) row."""
+                       extracted_json, status: str = "done", embedding=None, cluster=None,
+                       url: Optional[str] = None) -> None:
+    """Write pipeline results back onto an existing (claimed) row; url replaces a raw share link."""
     payload = {
         "title": title,
         "raw_transcript": raw_transcript,
@@ -220,6 +240,8 @@ def update_reel_result(reel_id: str, title: str, raw_transcript, post_caption,
         payload["embedding"] = embedding
     if cluster is not None:
         payload["cluster"] = cluster
+    if url is not None:
+        payload["url"] = url
     get_client().table(TABLE).update(payload).eq("id", reel_id).execute()
 
 
@@ -253,6 +275,45 @@ def recover_stale_processing(stale_before: datetime) -> int:
     }).eq("status", "processing")
       .lt("processing_started_at", stale_before.astimezone(timezone.utc).isoformat())
       .execute())
+    return len(res.data or [])
+
+
+def heartbeat() -> None:
+    """Record that the worker is alive; the dashboard warns when this goes stale."""
+    get_client().table("worker_status").upsert(
+        {"id": 1, "last_seen": datetime.now(timezone.utc).isoformat()}).execute()
+
+
+def claim_next_cluster_job() -> Optional[dict]:
+    """Atomically claim the oldest pending recompute request, like claim_next_pending."""
+    c = get_client()
+    rows = (c.table("cluster_jobs").select("*").eq("status", "pending")
+            .order("created_at").limit(1).execute().data or [])
+    if not rows:
+        return None
+    payload = {"status": "running", "started_at": datetime.now(timezone.utc).isoformat()}
+    upd = (c.table("cluster_jobs").update(payload)
+           .eq("id", rows[0]["id"]).eq("status", "pending").execute())
+    if not upd.data:
+        return None  # lost the race
+    return {**rows[0], **payload}
+
+
+def finish_cluster_job(job_id: str, status: str, assigned: int = 0, error: Optional[str] = None) -> None:
+    get_client().table("cluster_jobs").update({
+        "status": status,
+        "assigned": assigned,
+        "error": str(error)[:500] if error else None,
+        "finished_at": datetime.now(timezone.utc).isoformat(),
+    }).eq("id", job_id).execute()
+
+
+def recover_stale_cluster_jobs(stale_before: datetime) -> int:
+    """Return recomputes abandoned by a crashed worker to the queue."""
+    res = (get_client().table("cluster_jobs").update({"status": "pending", "started_at": None})
+           .eq("status", "running")
+           .lt("started_at", stale_before.astimezone(timezone.utc).isoformat())
+           .execute())
     return len(res.data or [])
 
 
